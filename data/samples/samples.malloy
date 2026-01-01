@@ -1,0 +1,154 @@
+/**
+ * Malloy Model for TPL Sample Data
+ *
+ * This model defines the semantic layer for samples.csv, an employment
+ * survey dataset with 6,639 records.
+ *
+ * WHAT BELONGS HERE vs WHAT TPL HANDLES:
+ *
+ * ✓ Put in Malloy model:
+ *   - Computed dimensions (mapping codes to labels)
+ *   - Ordering fields (for @dimension.min ordering in TPL)
+ *   - Joins to other tables
+ *   - Complex calculated measures (ratios, YoY growth)
+ *
+ * ✗ TPL handles these at query time:
+ *   - Simple aggregations: income.sum(), income.mean(), count()
+ *   - Percentages: (income.sum ACROSS COLS)
+ *   - You don't need to pre-define "total_income is income.sum()"
+ */
+
+source: samples is duckdb.table('data/samples/samples.csv') extend {
+
+  // ============================================================
+  // COMPUTED DIMENSIONS
+  // TPL references these by name for grouping. The raw numeric
+  // codes in the CSV are transformed to readable labels.
+  // ============================================================
+
+  dimension:
+    // 3-category education format (most common in examples)
+    education is
+      pick '<HS' when educ < 12
+      pick 'HS' when educ = 12
+      pick 'Uni' when educ >= 13
+      else null
+
+    // For ordering education by definition order (not alphabetically)
+    // Use in TPL as: education@education_order.min
+    education_order is educ
+
+    // Detailed education format
+    education_detail is
+      pick '<HS' when educ < 12
+      pick 'HS graduate' when educ = 12
+      pick 'Some College' when educ >= 13 and educ <= 15
+      pick 'College Grad' when educ = 16
+      pick 'Some Graduate' when educ >= 17
+      else null
+
+    // 2-category education format for simplified examples
+    education2 is
+      pick '<= High School' when educ <= 12
+      pick 'High School' when educ >= 13
+      else null
+
+  // ============================================================
+  // Employment Status
+  // ============================================================
+  dimension:
+    employment is
+      pick 'Full-time' when fulltime = 2
+      pick 'Part-time' when fulltime >= 3
+      else null
+
+  // ============================================================
+  // Gender
+  // gendchar already has string values (Male/Female) in CSV
+  // ============================================================
+  dimension:
+    gender is gendchar
+
+    // Alternative from numeric column
+    gender_from_num is
+      pick 'Male' when gendnum = 1
+      pick 'Female' when gendnum = 2
+      else null
+
+  // ============================================================
+  // Sector
+  // ============================================================
+  dimension:
+    sector_label is
+      pick 'Private' when sector = 1 or sector = 5 or sector = 6
+      pick 'Public' when sector = 2 or sector = 3 or sector = 4
+      else null
+
+  // ============================================================
+  // Marital Status
+  // ============================================================
+  dimension:
+    marital_status is
+      pick 'Married' when marital >= 1 and marital <= 3
+      pick 'Widowed' when marital = 4
+      pick 'Divorced/Sep.' when marital = 5 or marital = 6
+      pick 'Never Married' when marital = 7
+      else null
+
+  // ============================================================
+  // Occupation
+  // ============================================================
+  dimension:
+    occupation is
+      pick 'Managerial' when occup = 1
+      pick 'Professional' when occup = 2
+      pick 'Technical' when occup = 3
+      pick 'Sales' when occup = 4
+      pick 'Clerical' when occup = 5
+      pick 'Services' when occup >= 6 and occup <= 8
+      pick 'Manufacturing' when occup = 9 or occup = 10
+      pick 'Transport' when occup = 11 or occup = 12
+      pick 'Farming' when occup = 13 or occup = 14
+      else null
+
+    // For ordering occupation by definition order
+    // Use in TPL as: occupation@occupation_order.min
+    occupation_order is occup
+
+  // ============================================================
+  // Country
+  // ============================================================
+  dimension:
+    country is
+      pick 'North America' when ctry = 1
+      pick 'South America' when ctry = 2
+      pick 'Other' when ctry >= 3
+      else null
+
+  // ============================================================
+  // Union Status
+  // ============================================================
+  dimension:
+    union_status is
+      pick 'Non-Union' when `union` = 1
+      pick 'Union' when `union` = 2
+      else null
+
+  // ============================================================
+  // String columns (already readable in CSV)
+  // ============================================================
+  dimension:
+    customer_type is custtype
+    company_size is size
+
+  // ============================================================
+  // COMPLEX MEASURES (only what TPL can't express)
+  //
+  // Note: Simple aggregates like income.sum() are NOT defined here
+  // because TPL computes them at query time. Only define measures
+  // for calculations TPL cannot express directly.
+  // ============================================================
+  measure:
+    // Example: ratio that TPL can't express in one cell
+    income_per_hour is income.sum() / hourly.sum()
+}

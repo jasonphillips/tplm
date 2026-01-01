@@ -1,0 +1,153 @@
+/**
+ * Malloy Source Definition for TPL Sample Data
+ *
+ * This source is configured to work with the samples.csv data,
+ * an employment survey dataset with 6,639 records.
+ *
+ * Available dimensions match common survey data patterns
+ * for demonstrating TPL cross-tabulation capabilities.
+ */
+
+source: samples is duckdb.table('{TABLE_PATH}') extend {
+
+  // ============================================================
+  // Education Formats
+  // ============================================================
+  dimension:
+    // 3-category education format (most common in examples)
+    education is
+      pick '<HS' when educ < 12
+      pick 'HS' when educ = 12
+      pick 'Uni' when educ >= 13
+      else null
+
+    // For ordering education by definition order (not alphabetically)
+    // Use in TPL as: education ASC@educ.min or education[-3@educ.min]
+    education_order is educ
+
+    // Detailed education format used in some chapters
+    education_detail is
+      pick '<HS' when educ < 12
+      pick 'HS graduate' when educ = 12
+      pick 'Some College' when educ >= 13 and educ <= 15
+      pick 'College Grad' when educ = 16
+      pick 'Some Graduate' when educ >= 17
+      else null
+
+    // 2-category education format for simplified examples
+    education2 is
+      pick '<= High School' when educ <= 12
+      pick 'High School' when educ >= 13
+      else null
+
+  // ============================================================
+  // Employment Status
+  // ============================================================
+  dimension:
+    employment is
+      pick 'Full-time' when fulltime = 2
+      pick 'Part-time' when fulltime >= 3
+      else null
+
+  // ============================================================
+  // Gender
+  // Note: gendchar already has string values (Male/Female)
+  // ============================================================
+  dimension:
+    gender is gendchar
+
+    // Numeric gender lookup
+    gender_from_num is
+      pick 'Male' when gendnum = 1
+      pick 'Female' when gendnum = 2
+      else null
+
+  // ============================================================
+  // Sector
+  // ============================================================
+  dimension:
+    sector_label is
+      pick 'Private' when sector = 1 or sector = 5 or sector = 6
+      pick 'Public' when sector = 2 or sector = 3 or sector = 4
+      else null
+
+  // ============================================================
+  // Marital Status
+  // ============================================================
+  dimension:
+    marital_status is
+      pick 'Married' when marital >= 1 and marital <= 3
+      pick 'Widowed' when marital = 4
+      pick 'Divorced/Sep.' when marital = 5 or marital = 6
+      pick 'Never Married' when marital = 7
+      else null
+
+  // ============================================================
+  // Occupation
+  // ============================================================
+  dimension:
+    occupation is
+      pick 'Managerial' when occup = 1
+      pick 'Professional' when occup = 2
+      pick 'Technical' when occup = 3
+      pick 'Sales' when occup = 4
+      pick 'Clerical' when occup = 5
+      pick 'Services' when occup >= 6 and occup <= 8
+      pick 'Manufacturing' when occup = 9 or occup = 10
+      pick 'Transport' when occup = 11 or occup = 12
+      pick 'Farming' when occup = 13 or occup = 14
+      else null
+
+    // For ordering occupation by definition order (not alphabetically)
+    // Use in TPL as: occupation ASC@occup.min
+    occupation_order is occup
+
+  // ============================================================
+  // Country
+  // ============================================================
+  dimension:
+    country is
+      pick 'North America' when ctry = 1
+      pick 'South America' when ctry = 2
+      pick 'Other' when ctry >= 3
+      else null
+
+  // ============================================================
+  // Union Status
+  // ============================================================
+  dimension:
+    union_status is
+      pick 'Non-Union' when `union` = 1
+      pick 'Union' when `union` = 2
+      else null
+
+  // ============================================================
+  // Customer Type (from string column)
+  // ============================================================
+  dimension:
+    customer_type is custtype
+
+  // ============================================================
+  // Size (from string column)
+  // ============================================================
+  dimension:
+    company_size is size
+
+  // ============================================================
+  // Standard Measures
+  // ============================================================
+  measure:
+    total_income is income.sum()
+    mean_income is income.avg()
+    max_income is income.max()
+    min_income is income.min()
+
+    total_hourly is hourly.sum()
+    mean_hourly is hourly.avg()
+
+    record_count is count()
+
+    // Satisfaction measures
+    total_sat is sat.sum()
+    mean_sat is sat.avg()
+}

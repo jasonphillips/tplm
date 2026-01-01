@@ -1,0 +1,67 @@
+{
+  "name": "tplm-lang",
+  "version": "0.1.0",
+  "description": "TPLm - Table Producing Language backed by Malloy.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "packages/parser/tpl.pegjs",
+    "packages/renderer/tpl-table.css",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:parser": "peggy --format es packages/parser/tpl.pegjs -o packages/parser/parser.js && mkdir -p dist/parser && cp packages/parser/parser.js packages/parser/parser.d.ts dist/parser/",
+    "build": "npm run build:parser && tsc",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "docs:dev": "cd docs-site && npm run docs:dev",
+    "docs:build": "cd docs-site && npm run docs:build",
+    "docs:preview": "cd docs-site && npm run docs:preview"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "peggy": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "@malloydata/db-bigquery": "^0.0.326",
+    "@malloydata/db-duckdb": "^0.0.326",
+    "@malloydata/malloy": "^0.0.326",
+    "chevrotain": "^11.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "tplm",
+    "tpl",
+    "table",
+    "crosstab",
+    "pivot",
+    "analytics",
+    "malloy",
+    "duckdb",
+    "bigquery",
+    "data-visualization"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasonphillips/tplm"
+  },
+  "homepage": "https://github.com/jasonphillips/tplm#readme",
+  "bugs": {
+    "url": "https://github.com/jasonphillips/tplm/issues"
+  }
+}

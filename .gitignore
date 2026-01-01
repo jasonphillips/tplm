@@ -1,0 +1,32 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Compiled TypeScript output in packages/ (build outputs to dist/)
+packages/**/*.js
+packages/**/*.d.ts
+# Exceptions: keep source files
+!packages/parser/tpl.pegjs
+!packages/parser/parser.d.ts
+.regression-snapshots/
+
+# Docs site build artifacts
+docs-site/.vitepress/cache/
+docs-site/.vitepress/dist/
+
+# Development directories (not for public repo)
+dev_docs/
+.claude/
+.devcontainer/
+/examples/
+output/
+playground/
+playground-web/
+public_docs/
+sas/
+CLAUDE.md
+
+# Dev docs in docs-site
+docs-site/.vitepress/*.md
+config

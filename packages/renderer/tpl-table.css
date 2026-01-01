@@ -1,0 +1,182 @@
+/**
+ * TPL Table Default Styles
+ *
+ * Import this CSS file to style TPL-generated tables.
+ * All styles use the .tpl- prefix to avoid conflicts.
+ *
+ * Usage:
+ *   import 'tplm-lang/renderer/tpl-table.css';
+ *   // or
+ *   <link rel="stylesheet" href="path/to/tpl-table.css">
+ */
+
+/* ==========================================================================
+   CSS Custom Properties (override these to customize)
+   ========================================================================== */
+
+:root {
+  /* Header colors */
+  --tpl-header-bg: #e8ecf1;
+  --tpl-header-text: #374151;
+  --tpl-header-border: #cbd5e1;
+
+  /* Row header colors (left side) */
+  --tpl-row-header-bg: #f1f5f9;
+  --tpl-row-header-text: #374151;
+
+  /* Data area */
+  --tpl-row-alt-bg: rgba(0, 0, 0, 0.015);
+  --tpl-cell-bg: transparent;
+
+  /* Total styling */
+  --tpl-total-header-bg: #dbeafe;
+  --tpl-total-cell-bg: rgba(59, 130, 246, 0.06);
+  --tpl-total-row-bg: rgba(34, 197, 94, 0.06);
+  --tpl-grand-total-bg: rgba(234, 179, 8, 0.1);
+
+  /* Subtotal styling */
+  --tpl-subtotal-bg: rgba(0, 0, 0, 0.02);
+
+  /* Corner area (top-left) */
+  --tpl-corner-bg: white;
+
+  /* Borders */
+  --tpl-border-color: #e2e8f0;
+}
+
+/* ==========================================================================
+   Base Table
+   ========================================================================== */
+
+.tpl-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.tpl-table th,
+.tpl-table td {
+  border: 1px solid var(--tpl-border-color);
+  padding: 8px 12px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   Column Headers (thead)
+   ========================================================================== */
+
+.tpl-table th {
+  background: var(--tpl-header-bg);
+  color: var(--tpl-header-text);
+  font-weight: 600;
+  border-color: var(--tpl-header-border);
+}
+
+/* ==========================================================================
+   Corner Cells (top-left area spanning row header columns)
+   ========================================================================== */
+
+/* Empty corner cells - solid background to prevent row striping showing through */
+.tpl-corner {
+  background: var(--tpl-corner-bg) !important;
+  border-color: var(--tpl-border-color) !important;
+}
+
+/* Corner cells with dimension labels */
+.tpl-corner-label {
+  background: var(--tpl-header-bg) !important;
+  color: var(--tpl-header-text) !important;
+  font-weight: 600;
+  text-align: right !important;
+}
+
+/* ==========================================================================
+   Row Headers (left side dimension values)
+   ========================================================================== */
+
+.tpl-row-header {
+  text-align: left !important;
+  background: var(--tpl-row-header-bg) !important;
+  color: var(--tpl-row-header-text) !important;
+}
+
+/* Row dimension values in data area */
+.tpl-row-dim {
+  text-align: left;
+  font-weight: 500;
+  background: var(--tpl-cell-bg);
+}
+
+/* ==========================================================================
+   Data Cells
+   ========================================================================== */
+
+.tpl-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Alternating row colors */
+.tpl-table tbody tr:nth-child(even) td:not(.total-col):not(.total-row) {
+  background: var(--tpl-row-alt-bg);
+}
+
+/* ==========================================================================
+   Total Columns (from ALL on column axis)
+   ========================================================================== */
+
+/* Total column header */
+.total-col {
+  background: var(--tpl-total-header-bg) !important;
+}
+
+/* Total column cells */
+td.total-col {
+  background: var(--tpl-total-cell-bg);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Total Rows (from ALL on row axis)
+   ========================================================================== */
+
+.total-row td {
+  background: var(--tpl-total-row-bg);
+  font-weight: 600;
+}
+
+/* Grand total (intersection of row and column totals) */
+.total-row td.total-col {
+  background: var(--tpl-grand-total-bg);
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   Sibling Labels (concatenation group headers)
+   ========================================================================== */
+
+.sibling-label {
+  text-align: center !important;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Dark Mode (optional - add .dark class to parent or use media query)
+   ========================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tpl-header-bg: #374151;
+    --tpl-header-text: #e5e7eb;
+    --tpl-header-border: #4b5563;
+    --tpl-row-header-bg: #4b5563;
+    --tpl-row-header-text: #e5e7eb;
+    --tpl-row-alt-bg: rgba(255, 255, 255, 0.02);
+    --tpl-total-header-bg: #1e3a5f;
+    --tpl-total-cell-bg: rgba(96, 165, 250, 0.12);
+    --tpl-total-row-bg: rgba(74, 222, 128, 0.12);
+    --tpl-grand-total-bg: rgba(250, 204, 21, 0.12);
+    --tpl-corner-bg: #1a1a1a;
+    --tpl-border-color: #4b5563;
+  }
+}

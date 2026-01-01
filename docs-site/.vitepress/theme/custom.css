@@ -1,0 +1,220 @@
+/**
+ * Custom styles for TPL documentation
+ */
+
+:root {
+  --vp-c-brand-1: #0d6efd;
+  --vp-c-brand-2: #0b5ed7;
+  --vp-c-brand-3: #084298;
+
+  /* TPL Table colors - lighter, more subtle palette */
+  --tpl-header-bg: #e8ecf1;
+  --tpl-header-text: #374151;
+  --tpl-header-border: #cbd5e1;
+  --tpl-row-header-bg: #f1f5f9;
+  --tpl-row-header-text: #374151;
+  --tpl-row-alt-bg: rgba(0, 0, 0, 0.015);
+  --tpl-row-dim-bg: transparent;
+  --tpl-total-header-bg: #dbeafe;
+  --tpl-total-cell-bg: rgba(59, 130, 246, 0.06);
+  --tpl-total-row-bg: rgba(34, 197, 94, 0.06);
+  --tpl-subtotal-bg: rgba(0, 0, 0, 0.02);
+  --tpl-grand-total-bg: rgba(234, 179, 8, 0.1);
+}
+
+/* TPL Table Styles */
+.tpl-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  margin: 20px 0;
+  overflow-x: auto;
+  display: block;
+}
+
+.tpl-table th,
+.tpl-table td {
+  border: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  text-align: right;
+}
+
+/* Column headers - subtle but distinct */
+.tpl-table th {
+  background: var(--tpl-header-bg);
+  color: var(--tpl-header-text);
+  font-weight: 600;
+  border-color: var(--tpl-header-border);
+}
+
+/* Row headers (leftmost columns) - same as column headers for consistency */
+.tpl-row-header {
+  text-align: left !important;
+  background: var(--tpl-row-header-bg) !important;
+  color: var(--tpl-row-header-text) !important;
+}
+
+/* Corner cells - white background (not transparent, to avoid alternating row colors showing through) */
+.tpl-corner {
+  background: var(--vp-c-bg, white) !important;
+  border-color: var(--vp-c-bg, white) !important;
+}
+
+
+/* Corner cells with labels - show header styling */
+.tpl-corner-label {
+  background: var(--vp-c-bg, white) !important;
+  color: var(--tpl-header-text) !important;
+  font-weight: 600;
+  text-align: right !important;
+  vertical-align: bottom;
+}
+
+/* Row dimension values - very subtle or no background */
+.tpl-row-dim {
+  text-align: left;
+  font-weight: 500;
+  background: var(--tpl-row-dim-bg);
+}
+
+/* Alternating row colors - extremely subtle */
+.tpl-table tbody tr:nth-child(even) td:not(.tpl-total-cell):not(.tpl-grand-total-cell) {
+  background: var(--tpl-row-alt-bg);
+}
+
+/* Column headers */
+.tpl-col-header {
+  text-align: center !important;
+}
+
+.tpl-agg-subheader {
+  font-size: 0.85em;
+  opacity: 0.9;
+}
+
+/* Data cells */
+.tpl-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Total column header - subtle blue tint */
+.tpl-total-header,
+.tpl-total-subheader {
+  background: var(--tpl-total-header-bg) !important;
+}
+
+/* Total column cells - subtle tint */
+.tpl-total-cell {
+  background: var(--tpl-total-cell-bg);
+  font-weight: 600;
+}
+
+/* Total rows - subtle green tint */
+.tpl-total-row {
+  background: var(--tpl-total-row-bg) !important;
+}
+
+.tpl-total-row td {
+  font-weight: 600;
+  background: var(--tpl-total-row-bg);
+}
+
+.tpl-total-row td.tpl-total-cell {
+  background: var(--tpl-grand-total-bg);
+}
+
+.tpl-total-label {
+  font-style: italic;
+}
+
+/* Grand total (intersection of row and column totals) */
+.tpl-grand-total-cell {
+  background: var(--tpl-grand-total-bg);
+  font-weight: 700;
+}
+
+/* Subtotal rows */
+.tpl-subtotal-row {
+  background: var(--tpl-subtotal-bg);
+}
+
+.tpl-subtotal-row td {
+  font-weight: 500;
+  font-style: italic;
+  background: var(--tpl-subtotal-bg);
+}
+
+.tpl-subtotal-row .tpl-total-cell {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* Row labels (vertical text for dimension names) */
+.tpl-row-label {
+  text-align: center !important;
+  background: var(--tpl-row-header-bg) !important;
+  color: var(--tpl-row-header-text) !important;
+  font-weight: 600;
+  font-size: 0.85em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 8px 4px !important;
+  min-width: 24px;
+  vertical-align: middle;
+}
+
+.tpl-row-label-header {
+  min-width: 24px;
+  background: var(--tpl-header-bg) !important;
+}
+
+/* Sibling labels (concatenation group headers) - same as regular headers */
+.sibling-label {
+  text-align: center !important;
+  font-weight: 600;
+}
+
+/* Example sections */
+.tpl-example {
+  margin: 20px 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+/* Hero section customization */
+.VPHero .name {
+  background: linear-gradient(120deg, #0d6efd 30%, #198754);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Code blocks */
+.vp-doc div[class*='language-'] {
+  margin: 16px 0;
+}
+
+/* Dark mode adjustments */
+.dark {
+  --tpl-header-bg: #374151;
+  --tpl-header-text: #e5e7eb;
+  --tpl-header-border: #4b5563;
+  --tpl-row-header-bg: #4b5563;
+  --tpl-row-header-text: #e5e7eb;
+  --tpl-row-alt-bg: rgba(255, 255, 255, 0.02);
+  --tpl-total-header-bg: #1e3a5f;
+  --tpl-total-cell-bg: rgba(96, 165, 250, 0.12);
+  --tpl-total-row-bg: rgba(74, 222, 128, 0.12);
+  --tpl-subtotal-bg: rgba(255, 255, 255, 0.03);
+  --tpl-grand-total-bg: rgba(250, 204, 21, 0.12);
+}
+
+.dark .tpl-table th,
+.dark .tpl-table td {
+  border-color: #4b5563;
+}
+
+.dark .tpl-corner {
+  background: var(--vp-c-bg, #1a1a1a) !important;
+  border-color: #4b5563 !important;
+}

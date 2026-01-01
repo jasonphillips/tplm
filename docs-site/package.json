@@ -1,0 +1,22 @@
+{
+  "name": "tplm-docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.28.0",
+    "@malloydata/malloy": "^0.0.326",
+    "@malloydata/db-duckdb": "^0.0.326"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0",
+    "vue": "^3.4.0",
+    "typescript": "^5.0.0",
+    "vite-plugin-node-polyfills": "^0.22.0"
+  }
+}

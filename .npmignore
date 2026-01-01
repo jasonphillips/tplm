@@ -1,0 +1,29 @@
+# development
+dev_docs/
+scripts/
+tests/
+playground/
+playground-web/
+legacy/
+sas/
+data/
+config/
+examples/
+output/
+public_docs/
+.devcontainer/
+.claude/
+CLAUDE.md
+
+# docs site (separate publish)
+docs-site/
+
+# build config
+tsconfig.json
+vitest.config.ts
+
+# misc
+*.log
+.DS_Store
+*.tgz
+.github/
