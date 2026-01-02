@@ -17,6 +17,7 @@ docs-site/.vitepress/dist/
 
 # Development directories (not for public repo)
 dev_docs/
+npm-test/
 .claude/
 .devcontainer/
 /examples/

@@ -16,6 +16,12 @@ hero:
       link: /playground
 ---
 
+## Background
+
+The original TPL was a language developed by the U.S. Bureau of Labor Statistics in the early 1970s for producing complex statistical tables from survey data on IBM mainframes. It was freely shared with other federal agencies and research institutions, with significant adoption. The language later influenced two commercial products: SAS's **PROC TABULATE** (1982), which adopted TPL's syntax and concepts, and **TPL Tables** by QQQ Software (1987).
+
+**TPLm** is intended as an opinionated, lean reimplementation, with an adjusted syntax that compiles to [Malloy](https://www.malloydata.dev/) for efficient querying against DuckDB or BigQuery, and renders to well-structured HTML tables.
+
 ## See What's Possible
 
 One line describes the table structure. TPL handles the rest - generating efficient queries, fetching data, and rendering HTML.

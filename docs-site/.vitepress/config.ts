@@ -23,11 +23,6 @@ export default defineConfig({
 
     sidebar: [
       {
-        text: "Background",
-        collapsed: false,
-        items: [{ text: "About TPL", link: "/background" }],
-      },
-      {
         text: "Getting Started",
         collapsed: false,
         items: [
