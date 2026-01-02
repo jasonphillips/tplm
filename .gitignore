@@ -30,4 +30,6 @@ CLAUDE.md
 
 # Dev docs in docs-site
 docs-site/.vitepress/*.md
+docs-site/*.md
 config
+

@@ -26,12 +26,26 @@ class TPLExecutor {
   private runtime: any = null
   private malloySource: string = ''
   private isInitialized: boolean = false
+  private initPromise: Promise<void> | null = null
+  private executeQueue: Promise<any> = Promise.resolve()
 
   async initialize() {
+    // If already initialized, return immediately
     if (this.isInitialized) {
       return
     }
 
+    // If initialization is in progress, wait for it
+    if (this.initPromise) {
+      return this.initPromise
+    }
+
+    // Start initialization and store the promise to prevent race conditions
+    this.initPromise = this.doInitialize()
+    return this.initPromise
+  }
+
+  private async doInitialize() {
     try {
       // Import DuckDB WASM connection
       const { DuckDBWASMConnection } = await import('./duckdb-wasm-connection')
@@ -47,6 +61,7 @@ class TPLExecutor {
 
       this.isInitialized = true
     } catch (err) {
+      this.initPromise = null // Reset so we can retry
       console.error('Failed to initialize TPL executor:', err)
       throw new Error(`Initialization failed: ${err}`)
     }
@@ -87,6 +102,13 @@ class TPLExecutor {
   }
 
   async execute(tplQuery: string, sourceName: string = 'samples'): Promise<ExecuteResult> {
+    // Queue execution to prevent concurrent access to DuckDB/Malloy
+    const result = this.executeQueue.then(() => this.doExecute(tplQuery, sourceName))
+    this.executeQueue = result.catch(() => {}) // Keep queue going even on errors
+    return result
+  }
+
+  private async doExecute(tplQuery: string, sourceName: string): Promise<ExecuteResult> {
     if (!this.isInitialized) {
       await this.initialize()
     }
