@@ -1,5 +1,8 @@
 # TPLm
 
+[![npm version](https://img.shields.io/npm/v/tplm-lang.svg)](https://www.npmjs.com/package/tplm-lang)
+[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://jasonphillips.github.io/tplm/)
+
 **One Language for Complex Tables** - Define table layout and data requirements in a single declaration.
 
 TPL is a unified language that describes **both** the presentation structure (rows, columns, nesting, totals) **and** the data requirements (dimensions, aggregations, filters). A single TPL table statement compiles to malloy queries, fetches data, and renders the result with correctly nested table structures, even for very complex or deeply nested constructions.
