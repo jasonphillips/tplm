@@ -59,7 +59,6 @@ export default defineConfig({
         items: [
           { text: "Row Total", link: "/examples/totals/row-total" },
           { text: "Column Total", link: "/examples/totals/column-total" },
-          { text: "Labeled Totals", link: "/examples/totals/labeled-totals" },
           { text: "Subtotals", link: "/examples/totals/subtotals" },
           { text: "Full Marginals", link: "/examples/totals/full-marginals" },
         ],

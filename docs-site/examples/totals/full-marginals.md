@@ -30,5 +30,5 @@ Placing `ALL` at multiple nesting levels creates a complete marginal table with 
 ## Related Examples
 
 - [Subtotals](/examples/totals/subtotals) - Subtotals at inner nesting levels only
-- [Labeled Totals](/examples/totals/labeled-totals) - Custom labels for clarity
+- [Total Labels](/examples/labels/total-labels) - Custom labels for clarity
 - [Row Total](/examples/totals/row-total) - Simple row total without column totals

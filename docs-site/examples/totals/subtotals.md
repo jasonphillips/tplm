@@ -30,4 +30,4 @@ When ALL appears inside a nesting (after `*`), it creates subtotals per parent g
 
 - [Full Marginals](/examples/totals/full-marginals) - Add grand totals alongside subtotals
 - [Row Total](/examples/totals/row-total) - Simple grand total without subtotals
-- [Labeled Totals](/examples/totals/labeled-totals) - Custom labels for subtotal rows
+- [Total Labels](/examples/labels/total-labels) - Custom labels for subtotal rows

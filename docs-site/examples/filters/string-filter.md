@@ -5,7 +5,7 @@ WHERE clause filters data before aggregation using string equality.
 ## Interactive Example
 
 <Playground
-  initial-query="TABLE\n  WHERE gender = 'F'\n  ROWS occupation\n  COLS education * income.sum\n;"
+  initial-query="TABLE\n  WHERE gender = 'Female'\n  ROWS occupation\n  COLS education * income.sum\n;"
   :auto-run="true"
   :show-tabs="true"
   :editor-rows="5"
@@ -20,7 +20,7 @@ WHERE clause filters data before aggregation using string equality.
 
 ## Query Breakdown
 
-- `WHERE gender = 'F'` - Filters to rows where gender equals 'F'
+- `WHERE gender = 'Female'` - Filters to rows where gender equals 'Female'
 
 String values must be enclosed in single quotes. Use IS NULL / IS NOT NULL for null checks.
 

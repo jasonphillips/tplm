@@ -5,7 +5,7 @@ Multiple conditions combined with AND or OR operators.
 ## Interactive Example
 
 <Playground
-  initial-query="TABLE\n  WHERE gender = 'F' AND income > 50000\n  ROWS occupation\n  COLS education * income.mean\n;"
+  initial-query="TABLE\n  WHERE gender = 'Female' AND income > 50000\n  ROWS occupation\n  COLS education * income.mean\n;"
   :auto-run="true"
   :show-tabs="true"
   :editor-rows="5"
@@ -20,7 +20,7 @@ Multiple conditions combined with AND or OR operators.
 
 ## Query Breakdown
 
-- `WHERE gender = 'F' AND income > 50000` - Combines a string equality filter with a numeric comparison using AND
+- `WHERE gender = 'Female' AND income > 50000` - Combines a string equality filter with a numeric comparison using AND
 
 Both conditions must be true for a row to be included. Use OR when either condition should match.
 

@@ -30,4 +30,4 @@ The `|` operator concatenates the dimension with ALL, creating columns for each 
 
 - [Row Total](/examples/totals/row-total) - Add totals to rows instead of columns
 - [Full Marginals](/examples/totals/full-marginals) - Both row and column totals
-- [Labeled Totals](/examples/totals/labeled-totals) - Custom labels for total cells
+- [Total Labels](/examples/labels/total-labels) - Custom labels for total cells

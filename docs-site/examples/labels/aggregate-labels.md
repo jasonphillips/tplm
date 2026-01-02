@@ -11,7 +11,6 @@ Labels on aggregates clarify what each column shows.
   :editor-rows="4"
   label="Try It"
   :variations="[
-    { label: 'Single Aggregate Label', query: 'TABLE\n  ROWS occupation\n  COLS education * income.sum \'Total Earnings\'\n;' },
     { label: 'Multiple Aggregate Labels', query: 'TABLE\n  ROWS occupation\n  COLS income.sum \'Sum\' | income.mean \'Average\' | income.count \'Count\'\n;' },
     { label: 'Labels with Totals', query: 'TABLE\n  ROWS (occupation | ALL \'All Jobs\')\n  COLS (education | ALL) * income.sum \'Income Total\'\n;' }
   ]"
@@ -24,7 +23,6 @@ Labels on aggregates clarify what each column shows.
 - Labels appear in column headers instead of default names like "income_sum"
 
 Aggregate labels make tables more readable by replacing technical field names with user-friendly descriptions.
-
 
 ## Related Examples
 

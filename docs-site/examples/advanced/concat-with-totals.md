@@ -31,5 +31,5 @@ The outer concatenation `|` creates two separate table sections stacked vertical
 ## Related Examples
 
 - [Row Concatenation](/examples/core/row-concat) - Basic concatenation of dimensions
-- [Labeled Totals](/examples/totals/labeled-totals) - Custom labels on total rows
+- [Total Labels](/examples/labels/total-labels) - Custom labels on total rows
 - [Deep Hierarchy](/examples/advanced/deep-hierarchy) - Multiple nesting with totals
