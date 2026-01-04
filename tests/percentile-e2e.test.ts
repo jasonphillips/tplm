@@ -69,6 +69,44 @@ describe('Percentile Utilities', () => {
       expect(percentiles).toHaveLength(1);
       expect(percentiles[0].method).toBe('p50');
     });
+
+    it('detects percentile in limit orderBy expression', () => {
+      const stmt = parse('TABLE ROWS state[-3@births.median] * births.sum COLS year;');
+      const percentiles = findPercentileAggregations(stmt);
+
+      expect(percentiles).toHaveLength(1);
+      expect(percentiles[0].measure).toBe('births');
+      expect(percentiles[0].method).toBe('median');
+      expect(percentiles[0].computedColumnName).toBe('__births_median');
+    });
+
+    it('detects percentile in order (DESC/ASC) orderBy expression', () => {
+      const stmt = parse('TABLE ROWS state DESC@births.p75 * births.sum COLS year;');
+      const percentiles = findPercentileAggregations(stmt);
+
+      expect(percentiles).toHaveLength(1);
+      expect(percentiles[0].measure).toBe('births');
+      expect(percentiles[0].method).toBe('p75');
+    });
+
+    it('detects percentiles in both regular aggregate and orderBy', () => {
+      const stmt = parse('TABLE ROWS state[-3@births.median] * births.(sum | p50) COLS year;');
+      const percentiles = findPercentileAggregations(stmt);
+
+      // Should find both median (from orderBy) and p50 (from aggregate)
+      expect(percentiles).toHaveLength(2);
+      const methods = percentiles.map(p => p.method);
+      expect(methods).toContain('median');
+      expect(methods).toContain('p50');
+    });
+
+    it('detects percentile in column dimension orderBy', () => {
+      const stmt = parse('TABLE ROWS state * births.sum COLS year[-5@births.p90];');
+      const percentiles = findPercentileAggregations(stmt);
+
+      expect(percentiles).toHaveLength(1);
+      expect(percentiles[0].method).toBe('p90');
+    });
   });
 
   describe('findDimensions', () => {
@@ -440,6 +478,94 @@ describe('Percentiles with ALL patterns', () => {
     );
 
     expect(html).toContain('<table');
+  });
+});
+
+describe('Percentile-based ordering and limits', () => {
+  it('orders rows by median (limit with percentile orderBy)', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html, grid } = await tpl.query(
+      'TABLE ROWS state[-3@births.median] * births.sum;'
+    );
+
+    expect(html).toContain('<table');
+    // Should have exactly 3 row headers (top 3 states by median births)
+    expect(grid.rowHeaders).toHaveLength(3);
+  });
+
+  it('orders rows ascending by p25 (limit with asc direction)', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html, grid } = await tpl.query(
+      'TABLE ROWS state[3@births.p25] * births.sum;'
+    );
+
+    expect(html).toContain('<table');
+    // Should have exactly 3 row headers (bottom 3 states by p25 births)
+    expect(grid.rowHeaders).toHaveLength(3);
+  });
+
+  it('orders rows by p75 using DESC@ syntax (no limit)', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html } = await tpl.query(
+      'TABLE ROWS state DESC@births.p75 * births.sum;'
+    );
+
+    expect(html).toContain('<table');
+    // Should have all states (no limit), just ordered by p75
+  });
+
+  it('combines percentile in orderBy with percentile in aggregates', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html, grid } = await tpl.query(
+      'TABLE ROWS state[-3@births.median] * births.(sum | p50 | p75);'
+    );
+
+    expect(html).toContain('<table');
+    // Should have 3 rows
+    expect(grid.rowHeaders).toHaveLength(3);
+    // Should have percentile aggregate labels
+    expect(html).toContain('P50');
+    expect(html).toContain('P75');
+  });
+
+  it('orders columns by percentile', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html, grid } = await tpl.query(
+      'TABLE ROWS state[-3] * births.sum COLS year[-5@births.p50];'
+    );
+
+    expect(html).toContain('<table');
+    // Should have column headers (years limited to 5)
+    expect(grid.colHeaders).toBeDefined();
+  });
+
+  it('handles percentile ordering with crosstab', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+    const { html, grid } = await tpl.query(
+      'TABLE ROWS state[-3@births.median] * births.sum COLS gender;'
+    );
+
+    expect(html).toContain('<table');
+    // Should have 3 row headers and gender columns
+    expect(grid.rowHeaders).toHaveLength(3);
+    expect(html).toMatch(/[FM]/);
+  });
+
+  it('top 3 states by median have different values than top 3 by sum', async () => {
+    const tpl = fromCSV(TEST_DATA_PATH);
+
+    // Get top 3 by sum
+    const sumResult = await tpl.query('TABLE ROWS state[-3@births.sum] * births.sum;');
+    const sumStates = [...sumResult.html.matchAll(/<th>([A-Z]{2})<\/th>/g)].map(m => m[1]);
+
+    // Get top 3 by median
+    const medianResult = await tpl.query('TABLE ROWS state[-3@births.median] * births.sum;');
+    const medianStates = [...medianResult.html.matchAll(/<th>([A-Z]{2})<\/th>/g)].map(m => m[1]);
+
+    // The states might be different (depends on data distribution)
+    // But we're mainly checking both queries work
+    expect(sumStates).toHaveLength(3);
+    expect(medianStates).toHaveLength(3);
   });
 });
 

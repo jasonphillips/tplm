@@ -14,8 +14,8 @@
  * - Mapping between original measure names and computed column names
  */
 
-import type { TPLStatement, AggregationMethod, ItemExpression, AxisExpression, GroupExpression } from '../parser/ast.js';
-import { walkAxis, isMeasureBinding, isAnnotatedGroupRef, isAxisExpression } from '../parser/ast.js';
+import type { TPLStatement, AggregationMethod, ItemExpression, AxisExpression, GroupExpression, AggregateExpr } from '../parser/ast.js';
+import { walkAxis, isMeasureBinding, isAnnotatedGroupRef, isAxisExpression, isDimensionRef, isOrderByExpression } from '../parser/ast.js';
 
 // ---
 // PERCENTILE DETECTION
@@ -78,8 +78,60 @@ export interface PercentileInfo {
 }
 
 /**
+ * Helper to add a percentile to the found map
+ */
+function addPercentileToMap(
+  measure: string,
+  method: AggregationMethod,
+  found: Map<string, PercentileInfo>
+): void {
+  const key = `${measure}.${method}`;
+  if (!found.has(key)) {
+    const quantile = PERCENTILE_VALUES[method] ?? 0.5;
+    found.set(key, {
+      measure,
+      method,
+      quantile,
+      computedColumnName: `__${measure}_${method}`,
+      measureName: `${measure}_${method}`,
+    });
+  }
+}
+
+/**
+ * Check if an orderBy expression uses a percentile and add it to found map
+ */
+function checkOrderByForPercentile(
+  orderBy: string | AggregateExpr | { type: 'ratioExpr'; numerator: AggregateExpr; denominator: AggregateExpr } | undefined,
+  found: Map<string, PercentileInfo>
+): void {
+  if (!orderBy || typeof orderBy === 'string') return;
+
+  if (isOrderByExpression(orderBy)) {
+    if (orderBy.type === 'aggregateExpr') {
+      if (isPercentileMethod(orderBy.function as AggregationMethod)) {
+        addPercentileToMap(orderBy.field, orderBy.function as AggregationMethod, found);
+      }
+    } else if (orderBy.type === 'ratioExpr') {
+      // Check both numerator and denominator
+      if (isPercentileMethod(orderBy.numerator.function as AggregationMethod)) {
+        addPercentileToMap(orderBy.numerator.field, orderBy.numerator.function as AggregationMethod, found);
+      }
+      if (isPercentileMethod(orderBy.denominator.function as AggregationMethod)) {
+        addPercentileToMap(orderBy.denominator.field, orderBy.denominator.function as AggregationMethod, found);
+      }
+    }
+  }
+}
+
+/**
  * Find all percentile aggregations in a parsed TPL statement.
  * Returns information about each unique (measure, method) pair.
+ *
+ * This includes percentiles used in:
+ * - Measure bindings (e.g., income.p50)
+ * - Limit orderBy expressions (e.g., occupation[-3@income.median])
+ * - Order orderBy expressions (e.g., occupation DESC@income.p75)
  */
 export function findPercentileAggregations(stmt: TPLStatement): PercentileInfo[] {
   const found = new Map<string, PercentileInfo>();
@@ -91,17 +143,7 @@ export function findPercentileAggregations(stmt: TPLStatement): PercentileInfo[]
       if (isMeasureBinding(item)) {
         for (const agg of item.aggregations) {
           if (isPercentileMethod(agg.method)) {
-            const key = `${item.measure}.${agg.method}`;
-            if (!found.has(key)) {
-              const quantile = PERCENTILE_VALUES[agg.method] ?? 0.5;
-              found.set(key, {
-                measure: item.measure,
-                method: agg.method,
-                quantile,
-                computedColumnName: `__${item.measure}_${agg.method}`,
-                measureName: `${item.measure}_${agg.method}`,
-              });
-            }
+            addPercentileToMap(item.measure, agg.method, found);
           }
         }
       } else if (isAnnotatedGroupRef(item) && item.aggregations) {
@@ -111,6 +153,15 @@ export function findPercentileAggregations(stmt: TPLStatement): PercentileInfo[]
             // Need to find the measures in the inner axis
             collectMeasuresFromAxis(item.inner, agg.method, found);
           }
+        }
+      } else if (isDimensionRef(item)) {
+        // Check limit.orderBy for percentiles (e.g., occupation[-3@income.median])
+        if (item.limit?.orderBy) {
+          checkOrderByForPercentile(item.limit.orderBy, found);
+        }
+        // Check order.orderBy for percentiles (e.g., occupation DESC@income.p75)
+        if (item.order?.orderBy) {
+          checkOrderByForPercentile(item.order.orderBy, found);
         }
       }
     });
@@ -354,6 +405,19 @@ export function transformTPLForPercentiles(
       const label = `${measure} ${methodLabel}`;
       const columnName = `${p.computedColumnName}${fullPartitionSuffix}`;
       transformed = transformed.replace(singlePattern, `${columnName}.min "${label}"`);
+    }
+
+    // Handle percentiles in orderBy expressions (no label needed for ordering)
+    // Patterns: @measure.method, DESC@measure.method, ASC@measure.method
+    for (const p of measurePercentiles) {
+      const columnName = `${p.computedColumnName}${fullPartitionSuffix}`;
+
+      // Pattern for orderBy after @ (e.g., @income.median or [-3@income.median])
+      const orderByPattern = new RegExp(
+        `(@)${escapeRegExp(measure)}\\.${p.method}\\b`,
+        'gi'
+      );
+      transformed = transformed.replace(orderByPattern, `$1${columnName}.min`);
     }
   }
 
