@@ -41,7 +41,7 @@ One line describes the table structure. TPL handles the rest - generating effici
 
 <Playground
   initial-query="TABLE
-  ROWS occupation[-5@income.sum] * (income.sum ACROSS COLS)
+  ROWS occupation DESC@income.sum * (income.sum ACROSS COLS)
   COLS education
 ;"
   :auto-run="true"
