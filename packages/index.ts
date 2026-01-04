@@ -85,6 +85,7 @@ import {
   createLocalConnection,
 } from './executor/index.js';
 import { renderGridToHTML } from './renderer/index.js';
+import type { DimensionOrderingProvider } from './compiler/dimension-utils.js';
 
 /**
  * Options for creating a TPL instance
@@ -154,6 +155,9 @@ export interface ExecuteTPLOptions {
 
   /** @deprecated Use `sourceName` instead */
   source?: string;
+
+  /** Ordering provider for definition-order sorting */
+  orderingProvider?: DimensionOrderingProvider;
 }
 
 /**
@@ -186,7 +190,7 @@ export class TPL {
   }
 
   /** compile TPL source to Malloy queries (no execution) */
-  compile(tplSource: string, options?: { sourceName?: string; source?: string }): CompileResult {
+  compile(tplSource: string, options?: { sourceName?: string; source?: string; orderingProvider?: DimensionOrderingProvider }): CompileResult {
     const ast = parse(tplSource);
     const spec = buildTableSpec(ast);
 
@@ -203,6 +207,7 @@ export class TPL {
     const queries = generateMalloyQueries(plan, sourceName, {
       where: spec.where,
       firstAxis: spec.firstAxis,
+      orderingProvider: options?.orderingProvider,
     });
 
     const malloy = queries.map(q => q.malloy).join('\n\n');
@@ -220,7 +225,10 @@ export class TPL {
       throw new Error('Either `model` or `malloySource` must be provided to execute()');
     }
 
-    const { malloy, queries, spec, plan } = this.compile(tplSource, { sourceName: effectiveSourceName });
+    const { malloy, queries, spec, plan } = this.compile(tplSource, {
+      sourceName: effectiveSourceName,
+      orderingProvider: options.orderingProvider,
+    });
 
     // execute all queries
     const rawResults: QueryResults = new Map();
@@ -231,7 +239,10 @@ export class TPL {
     }
 
     // build grid and render
-    const grid = buildGridSpec(spec, plan, rawResults, queries);
+    const grid = buildGridSpec(spec, plan, rawResults, {
+      malloyQueries: queries,
+      orderingProvider: options.orderingProvider,
+    });
     const html = renderGridToHTML(grid);
 
     return { html, grid, malloy, rawResults };
@@ -264,6 +275,16 @@ export function createBigQueryTPL(
 // EASY CONNECTORS - Skip Malloy, just query your data
 // ============================================================================
 
+// Import percentile utilities for EasyTPL
+import {
+  analyzeAndGeneratePercentileConfig,
+  postProcessMalloyForPercentiles,
+  generateMultiLevelPercentileSQL,
+  type SqlDialect,
+  type PercentileConfig,
+  type PartitionLevel,
+} from './compiler/percentile-utils.js';
+
 /**
  * Query a DuckDB-compatible file (CSV, Parquet) directly.
  * No Malloy knowledge required - just point to your file and query.
@@ -281,7 +302,11 @@ export function fromDuckDBTable(
   createLocalConnection();
   const sourceName = 'data';
   const model = `source: ${sourceName} is duckdb.table('${tablePath}')`;
-  return new EasyTPL(model, sourceName, options);
+  return new EasyTPL(model, sourceName, {
+    ...options,
+    tablePath,
+    dialect: 'duckdb',
+  });
 }
 
 /**
@@ -328,35 +353,194 @@ export function fromBigQueryTable(
   });
   const sourceName = 'data';
   const model = `source: ${sourceName} is bigquery.table('${options.table}')`;
-  return new EasyTPL(model, sourceName, options);
+  return new EasyTPL(model, sourceName, {
+    ...options,
+    tablePath: options.table,
+    dialect: 'bigquery',
+  });
 }
+
+/**
+ * Extended options for EasyTPL that include percentile support metadata.
+ */
+interface EasyTPLOptions extends TPLOptions {
+  /** Path to the source table (for percentile support) */
+  tablePath?: string;
+  /** SQL dialect (for percentile support) */
+  dialect?: SqlDialect;
+  /** Mapping from computed dimension names to dimension info (for percentile partitioning) */
+  dimensionMap?: Map<string, DimensionInfo>;
+  /** Ordering provider for definition-order sorting */
+  orderingProvider?: DimensionOrderingProvider;
+}
+
+// Import dimension utilities from compiler
+import {
+  parseDimensionMappings,
+  detectDimensionOrdering,
+  type DimensionInfo,
+} from './compiler/dimension-utils.js';
 
 /**
  * Simplified TPL API for direct table queries.
  * Created by fromDuckDBTable, fromCSV, or fromBigQueryTable.
+ *
+ * Supports percentile aggregations (p25, p50/median, p75, p90, p95, p99)
+ * by automatically generating derived SQL sources with window functions.
  */
 export class EasyTPL {
   private tpl: TPL;
   private model: string;
   private sourceName: string;
+  private tablePath?: string;
+  private dialect?: SqlDialect;
+  private dimensionMap: Map<string, DimensionInfo>;
+  private orderingProvider?: DimensionOrderingProvider;
 
-  constructor(model: string, sourceName: string, options: TPLOptions = {}) {
+  constructor(model: string, sourceName: string, options: EasyTPLOptions = {}) {
     this.tpl = new TPL(options);
     this.model = model;
     this.sourceName = sourceName;
+    this.tablePath = options.tablePath;
+    this.dialect = options.dialect;
+    this.dimensionMap = options.dimensionMap || new Map();
+    this.orderingProvider = options.orderingProvider;
   }
 
   /**
    * Execute a TPL query and get HTML result.
+   *
+   * Automatically handles percentile aggregations (p25, p50, p75, p90, p95, p99, median)
+   * by generating derived SQL sources with window functions.
+   *
    * @example
    * ```typescript
+   * // Regular aggregates
    * const { html } = await tpl.query('TABLE ROWS occupation * income.sum COLS education;');
+   *
+   * // Percentile aggregates (automatically handled)
+   * const { html } = await tpl.query('TABLE ROWS occupation * income.p50 COLS education;');
    * ```
    */
   async query(tplSource: string): Promise<ExecuteResult> {
+    // Check if we can handle percentiles (need tablePath and dialect)
+    if (this.tablePath && this.dialect) {
+      // Parse the TPL to detect percentiles
+      const stmt = parse(tplSource);
+      const percentileConfig = analyzeAndGeneratePercentileConfig(
+        stmt,
+        this.tablePath,
+        this.sourceName,
+        this.dialect,
+        tplSource
+      );
+
+      if (percentileConfig.hasPercentiles && percentileConfig.transformedTPL) {
+        // Map partition levels to use SQL expressions (CASE statements for computed dimensions)
+        // This ensures percentiles are computed per computed dimension value, not per raw column value
+        const mappedPartitionLevels: PartitionLevel[] = percentileConfig.partitionLevels.map(level => ({
+          dimensions: level.dimensions.map(dim => {
+            const info = this.dimensionMap.get(dim);
+            return info ? info.sqlExpression : dim;
+          }),
+          suffix: level.suffix,
+        }));
+
+        // Generate multi-level percentile SQL with all partition levels
+        let whereClause = '';
+        if (stmt.where) {
+          // Map computed dimension names to raw columns in WHERE clause
+          let rawWhere = stmt.where;
+          for (const [computed, info] of this.dimensionMap) {
+            rawWhere = rawWhere.replace(new RegExp(`\\b${computed}\\b`, 'gi'), info.rawColumn);
+          }
+          whereClause = rawWhere;
+        }
+
+        const derivedSQL = generateMultiLevelPercentileSQL(
+          this.tablePath,
+          percentileConfig.percentiles,
+          mappedPartitionLevels,
+          this.dialect,
+          whereClause || undefined
+        );
+
+        // Generate Malloy source with derived SQL
+        const connectionPrefix = this.dialect === 'bigquery' ? 'bigquery' : 'duckdb';
+        let derivedMalloySource = `source: ${this.sourceName} is ${connectionPrefix}.sql("""${derivedSQL}""")`;
+
+        // If we have an extended model, extract the extend block and append it
+        const extendMatch = this.model.match(/extend\s*\{([\s\S]*)\}$/);
+        if (extendMatch) {
+          derivedMalloySource += ` extend {${extendMatch[1]}}`;
+        }
+
+        // For queries with ALL patterns, we need to manually handle the pipeline
+        // to post-process the Malloy with correct partition columns
+        if (percentileConfig.hasAllPatterns) {
+          // Compile the transformed TPL
+          const effectiveAst = parse(percentileConfig.transformedTPL);
+          const spec = buildTableSpec(effectiveAst);
+          const plan = generateQueryPlan(spec);
+          const malloyQueries = generateMalloyQueries(plan, this.sourceName, {
+            where: spec.where,
+            firstAxis: spec.firstAxis,
+            orderingProvider: this.orderingProvider,
+          });
+
+          // Post-process each Malloy query and execute
+          const rawResults: QueryResults = new Map();
+          for (const queryInfo of malloyQueries) {
+            // Determine outer dimensions from the query's row groupings
+            // (these are the dimensions at the outer level of the Malloy query)
+            const outerDimensions = (queryInfo.rowGroupings || []).map(g => g.dimension);
+
+            // Post-process Malloy to use correct partition column for outer aggregates
+            let processedMalloy = queryInfo.malloy;
+            if (percentileConfig.partitionLevels.length > 1) {
+              processedMalloy = postProcessMalloyForPercentiles(
+                queryInfo.malloy,
+                percentileConfig.percentiles,
+                percentileConfig.partitionLevels,
+                outerDimensions
+              );
+            }
+
+            // Execute the processed query
+            const fullMalloy = `${derivedMalloySource}\n${processedMalloy}`;
+            const data = await executeMalloy(fullMalloy);
+            rawResults.set(queryInfo.id, data);
+          }
+
+          // Build grid and render
+          const grid = buildGridSpec(spec, plan, rawResults, {
+            malloyQueries,
+            orderingProvider: this.orderingProvider,
+          });
+          const html = renderGridToHTML(grid);
+
+          return {
+            html,
+            grid,
+            malloy: malloyQueries.map(q => q.malloy).join('\n\n'),
+            rawResults,
+          };
+        }
+
+        // No ALL patterns - use standard execute path
+        return this.tpl.execute(percentileConfig.transformedTPL, {
+          model: derivedMalloySource,
+          sourceName: this.sourceName,
+          orderingProvider: this.orderingProvider,
+        });
+      }
+    }
+
+    // No percentiles or can't handle them - use standard path
     return this.tpl.execute(tplSource, {
       model: this.model,
       sourceName: this.sourceName,
+      orderingProvider: this.orderingProvider,
     });
   }
 
@@ -364,12 +548,21 @@ export class EasyTPL {
    * Add computed dimensions or complex measures to the model.
    * Returns a new EasyTPL with the extended model.
    *
+   * Percentile support: When extending with computed dimensions, the system
+   * automatically extracts dimension→column mappings for common patterns:
+   * - Simple alias: `dimension: foo is bar` (foo maps to bar)
+   * - Pick expression: `dimension: foo is pick 'X' when bar = 1...` (foo maps to bar)
+   *
+   * These mappings are used for PARTITION BY in percentile window functions.
+   *
    * @example
    * ```typescript
    * const tpl = fromCSV('employees.csv').extend(`
    *   dimension:
    *     department is pick 'Engineering' when dept_code = 1 else 'Other'
    * `);
+   * // Now 'department' is mapped to 'dept_code' for percentile partitioning
+   * await tpl.query('TABLE ROWS department * salary.p50;');
    * ```
    */
   extend(malloyExtend: string): EasyTPL {
@@ -384,11 +577,70 @@ export class EasyTPL {
       ? this.model.replace(/}$/, `\n${malloyExtend}\n}`)
       : extendedModel;
 
-    return new EasyTPL(finalModel, this.sourceName, {});
+    // Parse the extend text to extract dimension→column mappings
+    const newMappings = parseDimensionMappings(malloyExtend);
+
+    // Merge with existing mappings (new mappings take precedence)
+    const mergedMap = new Map(this.dimensionMap);
+    for (const [dim, col] of newMappings) {
+      mergedMap.set(dim, col);
+    }
+
+    // Detect ordering dimensions from the full model
+    // Extract the extend block from finalModel for detection
+    const extendMatch = finalModel.match(/extend\s*\{([\s\S]*)\}\s*$/);
+    const fullExtendBlock = extendMatch ? extendMatch[1] : malloyExtend;
+    const orderingProvider = detectDimensionOrdering(fullExtendBlock);
+
+    // Inject auto-generated order dimensions for true definition order
+    // Must be in a dimension: block, inserted before any measure: blocks
+    const autoDims = orderingProvider.getAutoOrderDimensions();
+    let modelWithAutoDims = finalModel;
+    if (autoDims.length > 0) {
+      const autoDimsText = '\n  // Auto-generated for definition-order sorting\n  dimension:\n    ' + autoDims.join('\n    ');
+      // Insert before the first measure: block, or at the end if no measures
+      const measureMatch = finalModel.match(/(\n\s*measure:)/);
+      if (measureMatch && measureMatch.index !== undefined) {
+        modelWithAutoDims = finalModel.slice(0, measureMatch.index) + autoDimsText + finalModel.slice(measureMatch.index);
+      } else {
+        modelWithAutoDims = finalModel.replace(/}\s*$/, `${autoDimsText}\n}`);
+      }
+    }
+
+    return new EasyTPL(modelWithAutoDims, this.sourceName, {
+      tablePath: this.tablePath,
+      dialect: this.dialect,
+      dimensionMap: mergedMap,
+      orderingProvider,
+    });
   }
 
   /** Get the underlying Malloy model */
   getModel(): string {
     return this.model;
+  }
+
+  /** Get the table path (if available) */
+  getTablePath(): string | undefined {
+    return this.tablePath;
+  }
+
+  /** Get the SQL dialect (if available) */
+  getDialect(): SqlDialect | undefined {
+    return this.dialect;
+  }
+
+  /** Get the dimension info map (for percentile partitioning) */
+  getDimensionMap(): Map<string, DimensionInfo> {
+    return new Map(this.dimensionMap);
+  }
+
+  /** Get dimension→raw column mapping (for backward compatibility) */
+  getDimensionToColumnMap(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [dim, info] of this.dimensionMap) {
+      result.set(dim, info.rawColumn);
+    }
+    return result;
   }
 }

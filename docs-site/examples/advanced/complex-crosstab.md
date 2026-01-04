@@ -11,6 +11,7 @@ Full-featured table combining nesting, totals, limits, and multiple aggregates.
   :editor-rows="5"
   label="Try It"
   :variations="[
+    { label: 'With median and P95', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS (sector_label | ALL) * occupation[-3@income.sum] * gender\n  COLS (education | ALL) * (income.p50:currency | income.p95:currency)\n;' },
     { label: 'Without Totals', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS sector_label * occupation[-3@income.sum] * gender\n  COLS education * (income.sum:currency | income.mean:decimal.2)\n;' },
     { label: 'Top 5 Occupations', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS (sector_label | ALL) * occupation[-5@income.sum] * gender\n  COLS (education | ALL) * income.sum:currency\n;' },
     { label: 'Single Aggregate', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS (sector_label | ALL) * occupation[-3@income.sum]\n  COLS (education | ALL) * income.sum:currency\n;' }

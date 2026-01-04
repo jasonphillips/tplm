@@ -33,6 +33,8 @@ The original TPL was a language developed by the U.S. Bureau of Labor Statistics
 
 **[Try the standalone playground](https://jasonphillips.github.io/tplm/playground/)** - Full-featured editor with dataset selector and multiple tabs.
 
+> **Note:** The documentation playground uses a pre-configured dataset with dimensions (`education`, `gender`, `occupation`, etc.) and measures (`income.sum`, `income.mean`, etc.) already defined, so you can focus on learning TPL syntax without setup.
+
 ---
 
 ## Installation
@@ -78,55 +80,23 @@ const { html } = await tpl.query("TABLE ROWS region * revenue.sum;");
 
 ### Adding Computed Dimensions
 
-If you need to transform raw values (like mapping codes to labels):
+Define computed dimensions using Malloy's extend syntax:
 
 ```typescript
 const tpl = fromCSV("employees.csv").extend(`
   dimension:
-    department is
-      pick 'Engineering' when dept_code = 1
-      pick 'Sales' when dept_code = 2
-      else 'Other'
+    education is
+      pick '<HS' when educ < 12
+      pick 'HS' when educ = 12
+      pick 'College' when educ >= 13
+      else null
+    education_order is educ  // for definition-order sorting
+
+    gender is gendchar
 `);
 
-const { html } = await tpl.query("TABLE ROWS department * salary.sum;");
+const { html } = await tpl.query("TABLE ROWS education * gender * income.sum;");
 ```
-
-## Advanced Usage with Malloy Models
-
-For complex scenarios with joins, computed measures, or multiple sources:
-
-```typescript
-import { createTPL } from "tplm-lang";
-
-const MODEL = `
-source: sales is duckdb.table('sales.csv') extend {
-  dimension:
-    region is pick 'North' when region_code = 1 else 'South'
-}
-`;
-
-const tpl = createTPL({ maxLimit: 100 });
-
-const { html } = await tpl.execute(
-  "TABLE ROWS region * revenue.sum COLS quarter | ALL;",
-  { model: MODEL, sourceName: "sales" }
-);
-```
-
-## Understanding the Model vs TPL
-
-**What belongs in your Malloy model:**
-
-- Computed dimensions (mapping codes to labels)
-- Joins between tables
-- Complex calculated measures TPL can't express
-
-**What TPL computes at query time:**
-
-- Simple aggregations: `revenue.sum`, `revenue.mean`, `n` (count)
-- Percentages: `(revenue.sum ACROSS COLS)`
-- You don't need to pre-define `total_revenue is revenue.sum()`
 
 ## TPL Syntax
 
@@ -150,6 +120,9 @@ ROWS region * product * revenue.sum
 
 -- multiple aggregates
 ROWS region * revenue.(sum | mean | max)
+
+-- percentiles (p25, p50/median, p75, p90, p95, p99)
+ROWS region * income.(p25 | p50 | p75)
 
 -- count of records
 ROWS region * n
@@ -213,13 +186,13 @@ const tpl = fromBigQueryTable({
   credentialsPath: "./credentials.json",
 });
 
-// Query and render
-const { html } = await tpl.query("TABLE ROWS region * revenue.sum;");
-
-// Add computed dimensions
+// Add computed dimensions with .extend()
 const tplWithDims = tpl.extend(`
   dimension: region is pick 'North' when region_code = 1 else 'South'
 `);
+
+// Then query
+const { html } = await tplWithDims.query("TABLE ROWS region * revenue.sum;");
 ```
 
 ### Full API (with Malloy Models)
@@ -338,6 +311,43 @@ The renderer produces HTML tables with:
 - Row and column totals
 - Number formatting
 - CSS classes for styling (`tpl-table`, `tpl-cell`, `tpl-total-cell`, `tpl-corner`, etc.)
+
+## Advanced: Using Full Malloy Models
+
+For complex scenarios requiring joins, pre-defined measures, or multiple sources, you can use full Malloy models. This is an advanced approach for users already familiar with Malloy.
+
+```typescript
+import { createTPL } from "tplm-lang";
+
+const MODEL = `
+source: sales is duckdb.table('sales.csv') extend {
+  dimension:
+    region is pick 'North' when region_code = 1 else 'South'
+}
+`;
+
+const tpl = createTPL({ maxLimit: 100 });
+
+const { html } = await tpl.execute(
+  "TABLE ROWS region * revenue.sum COLS quarter | ALL;",
+  { model: MODEL, sourceName: "sales" }
+);
+```
+
+> **Note:** When using full Malloy models, **percentile aggregations are not supported** (`p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `median`). This is because percentiles require pre-computing values via SQL window functions against the raw table, and TPL cannot introspect complex Malloy models to determine the underlying table structure. Use the Easy Connectors (fromCSV, fromDuckDBTable, fromBigQueryTable) for percentile support.
+
+**What belongs in your Malloy model:**
+
+- Joins between tables
+- Complex calculated measures TPL cannot express
+
+**What TPL computes at query time:**
+
+- Simple aggregations: `revenue.sum`, `revenue.mean`, `n` (count)
+- Percentages: `(revenue.sum ACROSS COLS)`
+- You do not need to pre-define `total_revenue is revenue.sum()`
+
+---
 
 ## Development
 

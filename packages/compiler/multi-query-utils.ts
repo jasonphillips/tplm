@@ -77,6 +77,12 @@ export function escapeWhereExpression(expr: string): string {
 
 /**
  * Map of TPL aggregation methods to Malloy methods
+ *
+ * Native Malloy aggregates: sum, avg, min, max, count, stddev
+ *
+ * NOTE: median is NOT supported by Malloy. While it's in the TPL parser for
+ * future compatibility, it will produce a Malloy compile error. Malloy's raw
+ * SQL syntax (function!) only works for scalar functions, not aggregates.
  */
 const AGG_METHOD_MAP: Record<string, string> = {
   sum: 'sum',
@@ -84,7 +90,7 @@ const AGG_METHOD_MAP: Record<string, string> = {
   count: 'count',
   min: 'min',
   max: 'max',
-  median: 'median',
+  median: 'median',  // NOT SUPPORTED - will error at Malloy compile time
   stdev: 'stddev',
   pct: 'sum',
   pctn: 'count',

@@ -18,11 +18,10 @@ source: samples is duckdb.table('{TABLE_PATH}') extend {
     education is
       pick '<HS' when educ < 12
       pick 'HS' when educ = 12
-      pick 'Uni' when educ >= 13
+      pick 'College' when educ >= 13
       else null
 
-    // For ordering education by definition order (not alphabetically)
-    // Use in TPL as: education ASC@educ.min or education[-3@educ.min]
+    // Legacy: No longer needed - TPL now auto-detects pick expressions for definition-order sorting
     education_order is educ
 
     // Detailed education format used in some chapters
@@ -98,8 +97,7 @@ source: samples is duckdb.table('{TABLE_PATH}') extend {
       pick 'Farming' when occup = 13 or occup = 14
       else null
 
-    // For ordering occupation by definition order (not alphabetically)
-    // Use in TPL as: occupation ASC@occup.min
+    // Legacy: No longer needed - TPL now auto-detects pick expressions for definition-order sorting
     occupation_order is occup
 
   // ============================================================

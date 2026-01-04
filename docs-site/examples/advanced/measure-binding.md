@@ -11,6 +11,7 @@ Bind multiple measures to multiple aggregations with `(measures).(aggregations)`
   :editor-rows="4"
   label="Try It"
   :variations="[
+    { label: 'Percentile distribution', query: 'TABLE\n  ROWS occupation\n  COLS education * income.(p25 | p50 | p75 | p95)\n;' },
     { label: 'Single Measure, Multiple Aggs', query: 'TABLE\n  ROWS occupation\n  COLS education * income.(sum | mean | count)\n;' },
     { label: 'Multiple Measures, Single Agg', query: 'TABLE\n  ROWS occupation * gender\n  COLS education * (income | hourly).sum\n;' },
     { label: 'With Formatting (separate bindings)', query: 'TABLE\n  ROWS occupation * gender\n  COLS education * (income.sum:currency | income.mean:decimal.2)\n;' },

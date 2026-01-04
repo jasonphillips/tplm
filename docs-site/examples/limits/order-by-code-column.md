@@ -1,10 +1,33 @@
 # Order by Underlying Code
 
-When dimension labels are derived from numeric codes, alphabetic sorting gives incorrect results. Order by the underlying code to get the natural progression.
+::: warning Deprecated Pattern
+When using TPL-native `DIMENSION` syntax, **definition order is automatic**. You don't need to use `@column.min` for dimensions defined with `DIMENSION` - they will already sort in the order you defined the buckets.
 
-## The Problem
+This page documents ordering by underlying code for **advanced cases** or when using raw Malloy models without `DIMENSION` syntax.
+:::
 
-Consider `education_detail` which maps numeric education levels to labels:
+## The Modern Solution: Use DIMENSION Syntax
+
+Define your dimension with `DIMENSION` syntax and the order is automatic:
+
+```tpl
+DIMENSION education_detail FROM educ
+  '<HS' WHEN < 12
+  'HS graduate' WHEN = 12
+  'Some College' WHEN >= 13 AND <= 15
+  'College Grad' WHEN = 16
+  'Some Graduate' WHEN >= 17
+  ELSE NULL
+;
+
+TABLE ROWS education_detail * income.sum;
+```
+
+The results will appear in definition order: `<HS`, `HS graduate`, `Some College`, `College Grad`, `Some Graduate`.
+
+## Legacy Pattern: @column.min
+
+For dimensions defined in Malloy models (not `DIMENSION` syntax), alphabetic sorting gives incorrect results:
 
 ```malloy
 education_detail is
@@ -19,6 +42,8 @@ education_detail is
 **Alphabetically sorted:** `<HS`, `College Grad`, `HS graduate`, `Some College`, `Some Graduate`
 
 **Natural order (by education level):** `<HS`, `HS graduate`, `Some College`, `College Grad`, `Some Graduate`
+
+For these cases, use `@column.min` to order by the underlying code.
 
 ## Interactive Example
 
@@ -49,27 +74,15 @@ education_detail is
 - `COLS gender * income.sum` - Column breakdown by gender
 - `income.sum` - Measure: sum of income for each cell
 
-## Setting Up Your Malloy Model
+## When You Still Need This
 
-To enable this pattern, expose the underlying code column in your Malloy model:
+Use `@column.min` ordering when:
 
-```malloy
-source: samples is duckdb.table('data.csv') extend {
-  // The display label
-  dimension: education_detail is
-    pick '<HS' when educ < 12
-    pick 'HS graduate' when educ = 12
-    pick 'Some College' when educ >= 13 and educ <= 15
-    pick 'College Grad' when educ = 16
-    pick 'Some Graduate' when educ >= 17
-    else null
+1. **Using raw Malloy models** - dimensions defined in Malloy (not TPL `DIMENSION` syntax) don't have definition order metadata
+2. **Ordering by a different column** - e.g., sorting product names by product_id
+3. **Complex ordering logic** - when definition order isn't the natural order
 
-  // Expose the underlying code for ordering
-  // (educ is already a column, but you could also create a computed order field)
-}
-```
-
-Then in TPL, use `@educ.min` (or `.max`) to order by the code values.
+For new development, prefer `DIMENSION` syntax for automatic definition-order sorting.
 
 ## Related Examples
 

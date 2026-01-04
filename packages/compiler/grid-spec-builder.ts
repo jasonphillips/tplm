@@ -33,6 +33,10 @@ import {
   collectBranches,
 } from './table-spec.js';
 import { MalloyQuerySpec } from './query-plan-generator.js';
+import type { DimensionOrderingProvider } from './dimension-utils.js';
+
+// Module-level reference to ordering provider for definition-order sorting
+let currentOrderingProvider: DimensionOrderingProvider | undefined;
 
 // ---
 // MAIN BUILDER FUNCTION
@@ -44,19 +48,43 @@ import { MalloyQuerySpec } from './query-plan-generator.js';
 export type QueryResults = Map<string, any[]>;
 
 /**
+ * Options for buildGridSpec
+ */
+export interface BuildGridSpecOptions {
+  malloyQueries?: MalloyQuerySpec[];
+  /** Ordering provider for definition-order sorting */
+  orderingProvider?: DimensionOrderingProvider;
+}
+
+/**
  * Build a GridSpec from a TableSpec and query results.
  *
  * @param spec The table specification
  * @param plan The query plan
  * @param results Query results indexed by query ID
- * @param malloyQueries Optional Malloy query specs (for axis inversion info)
+ * @param malloyQueriesOrOptions Optional Malloy query specs or options object
  */
 export function buildGridSpec(
   spec: TableSpec,
   plan: QueryPlan,
   results: QueryResults,
-  malloyQueries?: MalloyQuerySpec[]
+  malloyQueriesOrOptions?: MalloyQuerySpec[] | BuildGridSpecOptions
 ): GridSpec {
+  // Handle both old signature (array) and new signature (options object)
+  let malloyQueries: MalloyQuerySpec[] | undefined;
+  let orderingProvider: DimensionOrderingProvider | undefined;
+
+  if (Array.isArray(malloyQueriesOrOptions)) {
+    malloyQueries = malloyQueriesOrOptions;
+  } else if (malloyQueriesOrOptions) {
+    malloyQueries = malloyQueriesOrOptions.malloyQueries;
+    orderingProvider = malloyQueriesOrOptions.orderingProvider;
+  }
+
+  // Set module-level ordering provider for definition-order sorting
+  currentOrderingProvider = orderingProvider;
+
+  try {
   // Build maps of query ID to special handling flags
   const invertedQueries = new Set<string>();
   const flatQueries = new Set<string>();
@@ -142,6 +170,10 @@ export function buildGridSpec(
     cornerRowLabels,
     leftModeRowLabels,
   };
+  } finally {
+    // Clear the registry after building
+    currentOrderingProvider = undefined;
+  }
 }
 
 // ---
@@ -575,7 +607,10 @@ function extractDimensionValues(
     }
   }
 
-  const preserveDataOrder = hasExplicitOrder || hasLimit;
+  // Also preserve data order for TPL-native dimensions with definition order
+  // These dimensions are ordered in the Malloy query via order_by on the _order aggregate
+  const hasDefinitionOrder = currentOrderingProvider?.hasDefinitionOrder(dimension) ?? false;
+  const preserveDataOrder = hasExplicitOrder || hasLimit || hasDefinitionOrder;
 
   // Look through all queries that have this dimension in the right axis
   for (const query of plan.queries) {

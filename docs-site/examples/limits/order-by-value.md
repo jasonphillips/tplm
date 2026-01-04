@@ -11,6 +11,7 @@ Use `DESC@aggregate` to order all rows by a computed value instead of alphabetic
   :editor-rows="4"
   label="Try It"
   :variations="[
+    { label: 'Order by median income', query: 'TABLE\n  ROWS occupation DESC@income.p50\n  COLS education * income.p50\n;' },
     { label: 'Order by average income instead', query: 'TABLE\n  ROWS occupation DESC@income.mean\n  COLS education * income.mean\n;' },
     { label: 'Ascending order (lowest first)', query: 'TABLE\n  ROWS occupation ASC@income.sum\n  COLS education * income.sum\n;' },
     { label: 'Add a limit: top 5 only', query: 'TABLE\n  ROWS occupation[-5@income.sum]\n  COLS education * income.sum\n;' },

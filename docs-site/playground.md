@@ -2,19 +2,33 @@
 
 Experiment with TPLm queries in your browser. All queries run locally using DuckDB WASM with a sample employment survey dataset.
 
-## Dataset Schema
+## Query Editor
 
-The `samples` dataset contains employment survey data with the following fields:
+Write your TPL query and click Run to see results:
 
-- **Dimensions**: `occupation`, `education`, `gender`, `custtype`, `size`
-- **Measures**: `income`, `record_count`
+<Playground
+  initial-query="TABLE ROWS occupation[5] * income.sum COLS education;"
+  :show-tabs="true"
+  :show-timing="true"
+  :editor-rows="4"
+  label="TPL Query"
+/>
 
-## Try These Examples
+## Dimension Definitions
+
+Expand this section to view or customize the computed dimensions. Changes apply to all queries on this page.
+
+<DimensionsEditor />
+
+::: tip Definition Order
+Notice how `occupation[5]` returns the first 5 occupations by *definition order* (Managerial, Professional, Technical...) rather than alphabetically. TPL automatically detects pick expressions and sorts by declaration order.
+:::
+
+## More Examples
 
 <Playground
   initial-query="TABLE ROWS occupation * income.sum;"
   :show-tabs="true"
-  :show-timing="true"
   :editor-rows="2"
   label="Simple Table"
 />
@@ -22,7 +36,6 @@ The `samples` dataset contains employment survey data with the following fields:
 <Playground
   initial-query="TABLE ROWS occupation * income.sum COLS education;"
   :show-tabs="true"
-  :show-timing="true"
   :editor-rows="2"
   label="Basic Crosstab"
 />
@@ -32,21 +45,8 @@ The `samples` dataset contains employment survey data with the following fields:
   ROWS occupation[-5@income.sum] * (gender | ALL) * income.(sum | mean)
   COLS education | ALL;"
   :show-tabs="true"
-  :show-timing="true"
   :editor-rows="4"
   label="Advanced Example"
-/>
-
-## Build Your Own
-
-Start with a blank canvas and create your own TPLm query:
-
-<Playground
-  initial-query="TABLE ROWS occupation * income.sum COLS education;"
-  :show-tabs="true"
-  :show-timing="true"
-  :editor-rows="6"
-  label="Custom Query"
 />
 
 ## Quick Reference

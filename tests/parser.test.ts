@@ -314,3 +314,55 @@ describe('TPL Parser - Invalid syntax detection', () => {
     expect(() => parseChevrotain('TABLE ROWS (a b).sum COLS year;')).toThrow();
   });
 });
+
+describe('TPL Parser - Percentile aggregations', () => {
+  testBothParsers(
+    'TABLE ROWS region * revenue.p50 COLS year;',
+    'Median (p50) binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p25 COLS year;',
+    'P25 binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p75 COLS year;',
+    'P75 binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p90 COLS year;',
+    'P90 binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p95 COLS year;',
+    'P95 binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p99 COLS year;',
+    'P99 binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.median COLS year;',
+    'Median (named) binding syntax'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.(p25 | p50 | p75) COLS year;',
+    'Multiple percentiles (IQR)'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.(sum | mean | p50) COLS year;',
+    'Mixed aggregations including percentile'
+  );
+
+  testBothParsers(
+    'TABLE ROWS region * revenue.p50:currency "Median Revenue" COLS year;',
+    'Percentile with format and label'
+  );
+});

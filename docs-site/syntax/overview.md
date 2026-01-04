@@ -2,7 +2,21 @@
 
 TPLm (Table Producing Language for Malloy) uses a declarative syntax to define cross-tabulated tables.
 
-## Basic Structure
+## Program Structure
+
+A TPLm statement defines a table layout with optional filters:
+
+```sql
+TABLE [FROM source] [WHERE condition] ROWS <row-axis> [COLS <column-axis>];
+```
+
+Dimensions (categorical groupings) and measures (numeric aggregations) are defined in your Malloy source using `.extend()`, then referenced in TPL statements.
+
+::: tip
+See the [Data Model](/getting-started/data-model) page for dimensions and measures available in the playground, and [Quick Start](/getting-started/quick-start#adding-computed-dimensions) for how to define your own.
+:::
+
+## Table Structure
 
 ```sql
 TABLE [FROM source] [WHERE condition] ROWS <row-axis> [COLS <column-axis>];
@@ -141,12 +155,24 @@ Show multiple statistics side by side:
 
 ### Available Aggregations
 
+**Basic:**
 - `sum` - Sum of values
 - `mean` / `avg` - Average
 - `count` / `n` - Row count
 - `min` / `max` - Minimum / Maximum
-- `median` - Median value
 - `stdev` - Standard deviation
+
+**Percentiles:**
+- `median` / `p50` - Median (50th percentile)
+- `p25`, `p75` - Quartiles
+- `p90`, `p95`, `p99` - Higher percentiles (useful for latency, response times)
+
+<Playground
+  initial-query="TABLE ROWS occupation * income.(mean | p50 | p95);"
+  :auto-run="true"
+  :editor-rows="1"
+  label="Mean vs Median vs P95"
+/>
 
 ## Limits and Ordering
 

@@ -11,6 +11,7 @@ Use `@aggregate` to order by a computed value instead of alphabetically. This sh
   :editor-rows="4"
   label="Try It"
   :variations="[
+    { label: 'Top 5 by median income', query: 'TABLE\n  ROWS occupation[-5@income.p50]\n  COLS education * gender * income.p50\n;' },
     { label: 'Top 3 instead of top 5', query: 'TABLE\n  ROWS occupation[-3@income.sum]\n  COLS education * gender * income.sum\n;' },
     { label: 'Bottom 5 by income (ascending)', query: 'TABLE\n  ROWS occupation[5@income.sum]\n  COLS education * gender * income.sum\n;' },
     { label: 'Top 5 by average income instead', query: 'TABLE\n  ROWS occupation[-5@income.mean]\n  COLS education * gender * income.mean\n;' },

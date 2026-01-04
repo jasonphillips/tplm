@@ -218,3 +218,97 @@
   background: var(--vp-c-bg, #1a1a1a) !important;
   border-color: #4b5563 !important;
 }
+
+/* ============================================
+   Cell Popover Styles
+   ============================================ */
+
+.tpl-cell-popover {
+  position: fixed;
+  z-index: 1000;
+  background: #1f2937;
+  color: #f3f4f6;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  max-width: 320px;
+  min-width: 150px;
+}
+
+.tpl-cell-popover.visible {
+  opacity: 1;
+}
+
+/* Popover content structure */
+.tpl-cell-popover .popover-dimensions {
+  display: grid;
+  gap: 6px;
+}
+
+.tpl-cell-popover .popover-dim {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tpl-cell-popover .dim-name {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.tpl-cell-popover .dim-value {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tpl-cell-popover .popover-aggregate {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #374151;
+  color: #60a5fa;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Light mode version */
+:root:not(.dark) .tpl-cell-popover {
+  background: #ffffff;
+  color: #1f2937;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+:root:not(.dark) .tpl-cell-popover .dim-name {
+  color: #6b7280;
+}
+
+:root:not(.dark) .tpl-cell-popover .dim-value {
+  color: #111827;
+}
+
+:root:not(.dark) .tpl-cell-popover .popover-aggregate {
+  border-top-color: #e5e7eb;
+  color: #2563eb;
+}
+
+/* Hover effect on data cells */
+.tpl-table td[data-cell] {
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.tpl-table td[data-cell]:hover {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+.dark .tpl-table td[data-cell]:hover {
+  background-color: rgba(96, 165, 250, 0.15) !important;
+}

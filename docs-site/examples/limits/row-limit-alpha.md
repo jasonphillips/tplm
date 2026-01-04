@@ -1,6 +1,12 @@
 # Alphabetic Limit
 
-Use `[N]` to show the first N values alphabetically. This shows the first 5 occupations when sorted A-Z.
+Use `[N]` to show the first N values in ascending order.
+
+::: tip Definition Order for DIMENSION
+For dimensions defined with `DIMENSION` syntax, this uses **definition order** (the order buckets are declared), not alphabetical order. This lets you control the natural ordering of categories like education levels or income brackets.
+:::
+
+This example shows the first 5 occupations from the `occupation` dimension (which follows definition order: Managerial, Professional, Technical, Sales, Clerical, ...).
 
 ## Interactive Example
 
@@ -21,13 +27,14 @@ Use `[N]` to show the first N values alphabetically. This shows the first 5 occu
 ## Query Breakdown
 
 - `TABLE` - Declares a crosstab table statement
-- `ROWS occupation[5]` - First 5 occupations alphabetically
-  - `[5]` - Positive number means ascending alphabetical order (A-Z), limit to 5
-  - No `@aggregate` - ordering is alphabetical, not by value
+- `ROWS occupation[5]` - First 5 occupations
+  - `[5]` - Positive number means ascending order, limit to 5
+  - For `DIMENSION`-defined dimensions, uses **definition order** (not alphabetic)
+  - For raw columns, uses alphabetic order (A-Z)
 - `COLS education * gender * income.sum` - Three-level column hierarchy
 - `income.sum` - Measure: sum of income for each cell
 
-The sign of the number controls direction: `[5]` gives first 5 (A-Z), `[-5]` gives last 5 (Z-A). To order by a computed value instead, add `@aggregate` like `[-5@income.sum]`.
+The sign of the number controls direction: `[5]` gives first N, `[-5]` gives last N. For dimensions defined with `DIMENSION` syntax, ordering follows definition order by default. To order by a computed value instead, add `@aggregate` like `[-5@income.sum]`.
 
 
 ## Related Examples

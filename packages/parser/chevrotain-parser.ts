@@ -9,6 +9,9 @@
 import { createToken, Lexer, CstParser, CstNode, IToken } from 'chevrotain';
 import {
   TPLStatement,
+  TPLProgram,
+  DimensionDef,
+  DimensionBucket,
   TableOptions,
   AxisExpression,
   GroupExpression,
@@ -36,15 +39,19 @@ const WB = '(?![a-zA-Z0-9_])';
 
 // Keywords - use word boundary to prevent matching as part of longer identifiers
 const Table = createToken({ name: 'Table', pattern: new RegExp(`TABLE${WB}`, 'i') });
+const Dimension = createToken({ name: 'Dimension', pattern: new RegExp(`DIMENSION${WB}`, 'i') });
 const Options = createToken({ name: 'Options', pattern: new RegExp(`OPTIONS${WB}`, 'i') });
 const From = createToken({ name: 'From', pattern: new RegExp(`FROM${WB}`, 'i') });
 const Where = createToken({ name: 'Where', pattern: new RegExp(`WHERE${WB}`, 'i') });
+const When = createToken({ name: 'When', pattern: new RegExp(`WHEN${WB}`, 'i') });
+const Else = createToken({ name: 'Else', pattern: new RegExp(`ELSE${WB}`, 'i') });
 const Rows = createToken({ name: 'Rows', pattern: new RegExp(`ROWS${WB}`, 'i') });
 const Cols = createToken({ name: 'Cols', pattern: new RegExp(`COL(S|UMNS?)${WB}`, 'i') });
 const All = createToken({ name: 'All', pattern: new RegExp(`ALL${WB}`, 'i') });
 const Then = createToken({ name: 'Then', pattern: new RegExp(`THEN${WB}`, 'i') });
 const By = createToken({ name: 'By', pattern: new RegExp(`BY${WB}`, 'i') });
 const Across = createToken({ name: 'Across', pattern: new RegExp(`ACROSS${WB}`, 'i') });
+const Null = createToken({ name: 'Null', pattern: new RegExp(`NULL${WB}`, 'i') });
 
 // Option keywords (for OPTIONS clause)
 const RowHeaders = createToken({ name: 'RowHeaders', pattern: /rowHeaders/i });
@@ -72,6 +79,13 @@ const Sum = createToken({ name: 'Sum', pattern: new RegExp(`sum${WB}`, 'i') });
 const Min = createToken({ name: 'Min', pattern: new RegExp(`min${WB}`, 'i') });
 const Max = createToken({ name: 'Max', pattern: new RegExp(`max${WB}`, 'i') });
 const N = createToken({ name: 'N', pattern: new RegExp(`n${WB}`, 'i') });
+// Percentile aggregations (require window function workaround)
+const P25 = createToken({ name: 'P25', pattern: new RegExp(`p25${WB}`, 'i') });
+const P50 = createToken({ name: 'P50', pattern: new RegExp(`p50${WB}`, 'i') });
+const P75 = createToken({ name: 'P75', pattern: new RegExp(`p75${WB}`, 'i') });
+const P90 = createToken({ name: 'P90', pattern: new RegExp(`p90${WB}`, 'i') });
+const P95 = createToken({ name: 'P95', pattern: new RegExp(`p95${WB}`, 'i') });
+const P99 = createToken({ name: 'P99', pattern: new RegExp(`p99${WB}`, 'i') });
 
 // Format keywords
 const Currency = createToken({ name: 'Currency', pattern: new RegExp(`currency${WB}`, 'i') });
@@ -124,16 +138,20 @@ const WhiteSpace = createToken({
 const allTokens = [
   WhiteSpace,
   // Keywords (longer first)
+  Dimension,
   Table,
   Options,
   From,
   Where,
+  When,
+  Else,
   Rows,
   Cols,
   All,
   Then,
   By,
   Across,
+  Null,
   // Option keywords (before Identifier)
   RowHeaders,
   IncludeNulls,
@@ -157,6 +175,13 @@ const allTokens = [
   Sum,
   Min,
   Max,
+  // Percentile aggregations (before N due to negative lookahead)
+  P25,
+  P50,
+  P75,
+  P90,
+  P95,
+  P99,
   N, // Must be last among aggs due to negative lookahead
   // Format keywords
   Currency,
@@ -202,7 +227,62 @@ class TPLParser extends CstParser {
     this.performSelfAnalysis();
   }
 
-  // Main entry point
+  // Program: multiple DIMENSION and TABLE statements
+  public program = this.RULE('program', () => {
+    this.MANY(() => {
+      this.OR([
+        { ALT: () => this.SUBRULE(this.dimensionStatement, { LABEL: 'dimensions' }) },
+        { ALT: () => this.SUBRULE(this.tableStatement, { LABEL: 'tables' }) },
+      ]);
+    });
+  });
+
+  // DIMENSION statement: DIMENSION name FROM column [buckets] ;
+  public dimensionStatement = this.RULE('dimensionStatement', () => {
+    this.CONSUME(Dimension);
+    this.CONSUME(Identifier, { LABEL: 'dimName' });
+    this.CONSUME(From);
+    this.CONSUME2(Identifier, { LABEL: 'sourceColumn' });
+    // Optional buckets
+    this.MANY(() => {
+      this.SUBRULE(this.dimensionBucket, { LABEL: 'buckets' });
+    });
+    // Optional ELSE clause
+    this.OPTION(() => {
+      this.CONSUME(Else);
+      this.OR([
+        { ALT: () => this.CONSUME(Null, { LABEL: 'elseNull' }) },
+        { ALT: () => this.CONSUME(StringLiteral, { LABEL: 'elseValue' }) },
+      ]);
+    });
+    this.CONSUME(Semicolon);
+  });
+
+  // Dimension bucket: 'label' WHEN condition
+  private dimensionBucket = this.RULE('dimensionBucket', () => {
+    this.CONSUME(StringLiteral, { LABEL: 'label' });
+    this.CONSUME(When);
+    this.SUBRULE(this.bucketCondition, { LABEL: 'condition' });
+  });
+
+  // Bucket condition: captures tokens until next label, ELSE, or semicolon
+  private bucketCondition = this.RULE('bucketCondition', () => {
+    this.AT_LEAST_ONE(() => {
+      this.OR([
+        { ALT: () => this.CONSUME(Identifier) },
+        { ALT: () => this.CONSUME(NumberLiteral) },
+        { ALT: () => this.CONSUME(ComparisonOp) },
+        { ALT: () => this.CONSUME(And) },
+        { ALT: () => this.CONSUME(Or) },
+        { ALT: () => this.CONSUME(Not) },
+        { ALT: () => this.CONSUME(LParen) },
+        { ALT: () => this.CONSUME(RParen) },
+        { ALT: () => this.CONSUME(CommaPunct) },
+      ]);
+    });
+  });
+
+  // Main entry point for single TABLE
   public tableStatement = this.RULE('tableStatement', () => {
     this.CONSUME(Table);
     this.OPTION(() => {
@@ -303,6 +383,7 @@ class TPLParser extends CstParser {
         { ALT: () => this.CONSUME(And) },
         { ALT: () => this.CONSUME(Or) },
         { ALT: () => this.CONSUME(Not) },
+        { ALT: () => this.CONSUME(Null) },  // For IS NULL / IS NOT NULL
         { ALT: () => this.CONSUME(Dot) },
         { ALT: () => this.CONSUME(LParen) },
         { ALT: () => this.CONSUME(RParen) },
@@ -508,6 +589,13 @@ class TPLParser extends CstParser {
       { ALT: () => this.CONSUME(Pctn) },
       { ALT: () => this.CONSUME(Pctsum) },
       { ALT: () => this.CONSUME(N) },
+      // Percentile aggregations
+      { ALT: () => this.CONSUME(P25) },
+      { ALT: () => this.CONSUME(P50) },
+      { ALT: () => this.CONSUME(P75) },
+      { ALT: () => this.CONSUME(P90) },
+      { ALT: () => this.CONSUME(P95) },
+      { ALT: () => this.CONSUME(P99) },
     ]);
     // Optional format specifier: :currency, :decimal.2, etc.
     this.OPTION(() => {
@@ -541,6 +629,13 @@ class TPLParser extends CstParser {
       { ALT: () => this.CONSUME(Pctn) },
       { ALT: () => this.CONSUME(Pctsum) },
       { ALT: () => this.CONSUME(N) },
+      // Percentile aggregations
+      { ALT: () => this.CONSUME(P25) },
+      { ALT: () => this.CONSUME(P50) },
+      { ALT: () => this.CONSUME(P75) },
+      { ALT: () => this.CONSUME(P90) },
+      { ALT: () => this.CONSUME(P95) },
+      { ALT: () => this.CONSUME(P99) },
     ]);
     this.SUBRULE(this.annotations);
     this.OPTION(() => {
@@ -827,6 +922,63 @@ class TPLToAstVisitor extends BaseTPLVisitor {
     this.validateVisitor();
   }
 
+  program(ctx: any): TPLProgram {
+    const dimensions: DimensionDef[] = ctx.dimensions
+      ? ctx.dimensions.map((d: CstNode) => this.visit(d))
+      : [];
+    const tables: TPLStatement[] = ctx.tables
+      ? ctx.tables.map((t: CstNode) => this.visit(t))
+      : [];
+    return { dimensions, tables };
+  }
+
+  dimensionStatement(ctx: any): DimensionDef {
+    const name = ctx.dimName[0].image;
+    const sourceColumn = ctx.sourceColumn[0].image;
+
+    const result: DimensionDef = {
+      type: 'dimension_def',
+      name,
+      sourceColumn,
+    };
+
+    // Parse buckets if present
+    if (ctx.buckets && ctx.buckets.length > 0) {
+      result.buckets = ctx.buckets.map((b: CstNode) => this.visit(b));
+    }
+
+    // Parse else clause if present
+    if (ctx.elseNull) {
+      result.elseValue = null;
+    } else if (ctx.elseValue) {
+      const raw = ctx.elseValue[0].image;
+      result.elseValue = raw.slice(1, -1); // Remove quotes
+    }
+
+    return result;
+  }
+
+  dimensionBucket(ctx: any): DimensionBucket {
+    const raw = ctx.label[0].image;
+    const label = raw.slice(1, -1); // Remove quotes
+    const condition = this.visit(ctx.condition[0]);
+    return { label, condition };
+  }
+
+  bucketCondition(ctx: any): string {
+    // Reconstruct the condition from tokens
+    const allTokens: IToken[] = [];
+    for (const key of Object.keys(ctx)) {
+      const tokens = ctx[key];
+      if (Array.isArray(tokens)) {
+        allTokens.push(...tokens);
+      }
+    }
+    // Sort by position and join
+    allTokens.sort((a, b) => a.startOffset - b.startOffset);
+    return allTokens.map(t => t.image).join(' ');
+  }
+
   tableStatement(ctx: any): TPLStatement {
     const source = ctx.fromClause ? this.visit(ctx.fromClause) : null;
     const where = ctx.whereClause ? this.visit(ctx.whereClause) : null;
@@ -1045,6 +1197,13 @@ class TPLToAstVisitor extends BaseTPLVisitor {
     else if (ctx.Pct) method = 'pct';
     else if (ctx.Pctn) method = 'pctn';
     else if (ctx.Pctsum) method = 'pctsum';
+    // Percentile aggregations
+    else if (ctx.P25) method = 'p25';
+    else if (ctx.P50) method = 'p50';
+    else if (ctx.P75) method = 'p75';
+    else if (ctx.P90) method = 'p90';
+    else if (ctx.P95) method = 'p95';
+    else if (ctx.P99) method = 'p99';
     else throw new Error('Unknown aggregation keyword');
 
     // Check for optional format specifier
@@ -1084,6 +1243,13 @@ class TPLToAstVisitor extends BaseTPLVisitor {
     else if (ctx.Pct) method = 'pct';
     else if (ctx.Pctn) method = 'pctn';
     else if (ctx.Pctsum) method = 'pctsum';
+    // Percentile aggregations
+    else if (ctx.P25) method = 'p25';
+    else if (ctx.P50) method = 'p50';
+    else if (ctx.P75) method = 'p75';
+    else if (ctx.P90) method = 'p90';
+    else if (ctx.P95) method = 'p95';
+    else if (ctx.P99) method = 'p99';
     else throw new Error('Unknown aggregation method');
 
     const annotations = this.visit(ctx.annotations[0]);
@@ -1345,8 +1511,17 @@ export interface ParseResult {
   parseErrors: any[];
 }
 
+export interface ProgramParseResult {
+  ast: TPLProgram;
+  lexErrors: any[];
+  parseErrors: any[];
+}
+
 /**
- * Parse a TPL statement using Chevrotain
+ * Parse a TPL statement using Chevrotain.
+ * For backward compatibility, this accepts either:
+ * - A single TABLE statement (returns TPLStatement)
+ * - A full program with DIMENSIONs and TABLEs (returns first TABLE from TPLProgram)
  */
 export function parse(input: string): TPLStatement {
   // Lexing
@@ -1355,9 +1530,39 @@ export function parse(input: string): TPLStatement {
     throw new Error(`Lexer errors: ${lexResult.errors.map(e => e.message).join(', ')}`);
   }
 
+  // Try parsing as a program first (supports DIMENSION + TABLE)
+  parserInstance.input = lexResult.tokens;
+  const cst = parserInstance.program();
+
+  if (parserInstance.errors.length > 0) {
+    throw new Error(`Parser errors: ${parserInstance.errors.map(e => e.message).join(', ')}`);
+  }
+
+  // AST transformation
+  const program: TPLProgram = visitorInstance.visit(cst);
+
+  // For backward compatibility, return first table statement
+  // (dimensions are parsed but not yet used in this path)
+  if (program.tables.length === 0) {
+    throw new Error('No TABLE statement found in input');
+  }
+
+  return program.tables[0];
+}
+
+/**
+ * Parse a full TPL program (DIMENSION and TABLE statements)
+ */
+export function parseProgram(input: string): TPLProgram {
+  // Lexing
+  const lexResult = TPLLexer.tokenize(input);
+  if (lexResult.errors.length > 0) {
+    throw new Error(`Lexer errors: ${lexResult.errors.map(e => e.message).join(', ')}`);
+  }
+
   // Parsing
   parserInstance.input = lexResult.tokens;
-  const cst = parserInstance.tableStatement();
+  const cst = parserInstance.program();
 
   if (parserInstance.errors.length > 0) {
     throw new Error(`Parser errors: ${parserInstance.errors.map(e => e.message).join(', ')}`);
@@ -1374,9 +1579,31 @@ export function parseWithErrors(input: string): ParseResult {
   const lexResult = TPLLexer.tokenize(input);
 
   parserInstance.input = lexResult.tokens;
-  const cst = parserInstance.tableStatement();
+  const cst = parserInstance.program();
 
   let ast: TPLStatement | null = null;
+  if (parserInstance.errors.length === 0 && lexResult.errors.length === 0) {
+    const program: TPLProgram = visitorInstance.visit(cst);
+    ast = program.tables[0] ?? null;
+  }
+
+  return {
+    ast: ast!,
+    lexErrors: lexResult.errors,
+    parseErrors: parserInstance.errors,
+  };
+}
+
+/**
+ * Parse program with full result including errors (for error recovery)
+ */
+export function parseProgramWithErrors(input: string): ProgramParseResult {
+  const lexResult = TPLLexer.tokenize(input);
+
+  parserInstance.input = lexResult.tokens;
+  const cst = parserInstance.program();
+
+  let ast: TPLProgram | null = null;
   if (parserInstance.errors.length === 0 && lexResult.errors.length === 0) {
     ast = visitorInstance.visit(cst);
   }

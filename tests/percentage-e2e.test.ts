@@ -81,7 +81,7 @@ describe('Percentage Aggregate E2E', () => {
 
       // HTML should be generated with percentage values
       expect(html).toContain('<table');
-      expect(html).toContain('<td>');
+      expect(html).toMatch(/<td[^>]*>/); // td with optional attributes
       expect(html).toMatch(/%/); // Should contain percentage values
     });
 

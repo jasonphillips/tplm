@@ -31,7 +31,7 @@ source: samples is duckdb.table('data/samples/samples.csv') extend {
     education is
       pick '<HS' when educ < 12
       pick 'HS' when educ = 12
-      pick 'Uni' when educ >= 13
+      pick 'College' when educ >= 13
       else null
 
     // For ordering education by definition order (not alphabetically)

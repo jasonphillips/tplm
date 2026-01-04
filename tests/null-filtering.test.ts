@@ -1,7 +1,19 @@
 /**
  * NULL Filtering Tests
  *
- * Tests automatic exclusion of NULL values from dimension groupings
+ * Tests automatic exclusion of NULL values from dimension groupings.
+ *
+ * NOTE: As of the fix for the concatenation bug, column dimensions get their
+ * NULL filters added at the nest level (per column section) rather than in
+ * the global WHERE clause. This ensures that concatenated column sections
+ * like `COLS (gender | occupation)` only filter on their own dimensions.
+ *
+ * The global WHERE clause now only contains:
+ * 1. User-specified WHERE conditions
+ * 2. Row dimension NULL filters
+ *
+ * Column dimension NULL filters are added in query-plan-generator.ts when
+ * building the nest clauses.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,13 +45,13 @@ describe('NULL Filtering', () => {
   });
 
   describe('2. Compiler - automatic NULL filters', () => {
-    it('should add NULL filters by default', () => {
+    it('should add NULL filters for row dimensions by default', () => {
       const tpl = 'TABLE ROWS occupation COLS education * income.sum;';
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // Should auto-generate NULL filters (with escaped field names for Malloy)
-      expect(spec.where).toBe('occupation != null and education != null');
+      // Only row dimensions in global WHERE - column dimensions filtered in nests
+      expect(spec.where).toBe('occupation is not null');
     });
 
     it('should NOT add NULL filters when includeNulls:true', () => {
@@ -56,8 +68,8 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // Should combine user's WHERE with NULL filters
-      expect(spec.where).toBe('(income > 50000) AND (occupation != null and education != null)');
+      // Should combine user's WHERE with row dimension NULL filters only
+      expect(spec.where).toBe('(income > 50000) AND (occupation is not null)');
     });
 
     it('should handle single dimension', () => {
@@ -65,29 +77,29 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      expect(spec.where).toBe('occupation != null');
+      expect(spec.where).toBe('occupation is not null');
     });
 
-    it('should handle nested dimensions', () => {
+    it('should handle nested row dimensions', () => {
       const tpl = 'TABLE ROWS occupation * gender * education COLS year * income.sum;';
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // All unique dimensions should be filtered (reserved words like 'year' escaped with backticks)
-      expect(spec.where).toContain('occupation != null');
-      expect(spec.where).toContain('gender != null');
-      expect(spec.where).toContain('education != null');
-      expect(spec.where).toContain('`year` != null');
+      // Only row dimensions in global WHERE - column dimensions filtered in nests
+      expect(spec.where).toContain('occupation is not null');
+      expect(spec.where).toContain('gender is not null');
+      expect(spec.where).toContain('education is not null');
+      // year is a COLS dimension - filtered at nest level, not global WHERE
+      expect(spec.where).not.toContain('year');
     });
 
-    it('should deduplicate dimensions', () => {
+    it('should deduplicate row dimensions', () => {
       const tpl = 'TABLE ROWS occupation | occupation COLS education * income.sum;';
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // occupation appears twice but should only filter once
-      const occurrences = (spec.where?.match(/occupation != null/g) || []).length;
-      expect(occurrences).toBe(1);
+      // occupation appears twice but should only filter once, education is in COLS
+      expect(spec.where).toBe('occupation is not null');
     });
   });
 
@@ -97,8 +109,8 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // Should filter both display dimensions (not ordering field)
-      expect(spec.where).toBe('occupation != null and education != null');
+      // Only row dimensions in global WHERE
+      expect(spec.where).toBe('occupation is not null');
     });
 
     it('should work with limits', () => {
@@ -106,7 +118,8 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      expect(spec.where).toBe('occupation != null and education != null');
+      // Only row dimensions in global WHERE
+      expect(spec.where).toBe('occupation is not null');
     });
 
     it('should work with ALL (totals)', () => {
@@ -114,8 +127,8 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // ALL doesn't add a dimension to filter
-      expect(spec.where).toBe('occupation != null and education != null');
+      // ALL doesn't add a dimension to filter, only row dimensions in global WHERE
+      expect(spec.where).toBe('occupation is not null');
     });
 
     it('should work with ACROSS percentages', () => {
@@ -123,9 +136,47 @@ describe('NULL Filtering', () => {
       const ast = parse(tpl);
       const spec = buildTableSpec(ast);
 
-      // Should filter dimensions used in percentage calculation
-      // The WHERE clause will apply to both numerator and denominator in Malloy
-      expect(spec.where).toBe('occupation != null and education != null');
+      // Only row dimensions in global WHERE - column dimensions filtered in nests
+      expect(spec.where).toBe('occupation is not null');
+    });
+  });
+
+  describe('4. Column concatenation bug fix', () => {
+    it('should NOT include all column dimensions in global WHERE for concatenated columns', () => {
+      // This test verifies the fix for the concatenation bug where
+      // COLS (gender | occupation) was incorrectly filtering the gender section
+      // by occupation IS NOT NULL, causing rows to be lost.
+      const tpl = 'TABLE ROWS education COLS (gender | occupation) * n;';
+      const ast = parse(tpl);
+      const spec = buildTableSpec(ast);
+
+      // Global WHERE should only contain row dimension (education)
+      // Column dimensions (gender, occupation) are filtered at nest level
+      expect(spec.where).toBe('education is not null');
+      expect(spec.where).not.toContain('gender');
+      expect(spec.where).not.toContain('occupation');
+    });
+
+    it('should work correctly with row-only queries', () => {
+      const tpl = 'TABLE ROWS (occupation | education) * income.sum;';
+      const ast = parse(tpl);
+      const spec = buildTableSpec(ast);
+
+      // Both row dimensions should be in the global WHERE
+      expect(spec.where).toContain('occupation is not null');
+      expect(spec.where).toContain('education is not null');
+    });
+
+    it('should work correctly with nested row and column dimensions', () => {
+      const tpl = 'TABLE ROWS state COLS (gender | occupation) * income.sum;';
+      const ast = parse(tpl);
+      const spec = buildTableSpec(ast);
+
+      // Only row dimensions in global WHERE
+      // Column dimensions (gender, occupation) are filtered at nest level
+      expect(spec.where).toBe('state is not null');
+      expect(spec.where).not.toContain('gender');
+      expect(spec.where).not.toContain('occupation');
     });
   });
 });

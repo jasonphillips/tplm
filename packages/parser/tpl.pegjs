@@ -373,6 +373,13 @@ aggregationKeyword
   / "pctn"i !identifierChar { return 'pctn'; }
   / "pctsum"i !identifierChar { return 'pctsum'; }
   / "n"i !identifierChar { return 'count'; }
+  // Percentile aggregations (require window function workaround)
+  / "p25"i !identifierChar { return 'p25'; }
+  / "p50"i !identifierChar { return 'p50'; }
+  / "p75"i !identifierChar { return 'p75'; }
+  / "p90"i !identifierChar { return 'p90'; }
+  / "p95"i !identifierChar { return 'p95'; }
+  / "p99"i !identifierChar { return 'p99'; }
 
 identifierChar
   = [a-zA-Z0-9_]

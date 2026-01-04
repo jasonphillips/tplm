@@ -70,19 +70,24 @@ export function buildTableSpec(stmt: TPLStatement): TableSpec {
   }
 
   // Auto-generate NULL filters unless includeNulls is explicitly true
+  // NOTE: We only include ROW dimensions in the global WHERE clause.
+  // Column dimensions get NULL filters added at the nest level in query-plan-generator.ts
+  // This fixes a bug where concatenated column sections (e.g., COLS (gender | occupation))
+  // would incorrectly filter ALL rows by ALL column dimensions, rather than each
+  // section filtering only by its own dimensions.
   const includeNulls = stmt.options.includeNulls ?? false;
   let whereClause = stmt.where ?? undefined;
 
   if (!includeNulls) {
-    // Extract all dimension names from axes
-    const dimensions = new Set<string>();
-    extractDimensionNames(rowAxis, dimensions);
-    extractDimensionNames(colAxis, dimensions);
+    // Extract only ROW dimension names (column dimensions are handled per-nest)
+    const rowDimensions = new Set<string>();
+    extractDimensionNames(rowAxis, rowDimensions);
 
-    // Generate NULL filters for each dimension
-    if (dimensions.size > 0) {
-      const nullFilters = Array.from(dimensions)
-        .map(dim => `${escapeFieldName(dim)} != null`)
+    // Generate NULL filters for row dimensions only
+    // Use 'is not null' syntax for Malloy compatibility
+    if (rowDimensions.size > 0) {
+      const nullFilters = Array.from(rowDimensions)
+        .map(dim => `${escapeFieldName(dim)} is not null`)
         .join(' and ');
 
       // Merge with existing WHERE clause

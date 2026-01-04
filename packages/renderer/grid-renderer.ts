@@ -594,6 +594,72 @@ function isInTotalPath(
 }
 
 /**
+ * Build a human-readable path description for tooltips.
+ * Format: "Dimension: Value, Dimension: Value → aggregate"
+ */
+function buildHumanPath(
+  rowValues: DimensionValues,
+  colValues: DimensionValues,
+  aggregateName: string | undefined,
+  aggregates: AggregateInfo[]
+): string {
+  const parts: string[] = [];
+
+  // Add row dimensions
+  for (const [dim, val] of rowValues) {
+    const displayDim = dim.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    parts.push(`${displayDim}: ${val}`);
+  }
+
+  // Add column dimensions
+  for (const [dim, val] of colValues) {
+    const displayDim = dim.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    parts.push(`${displayDim}: ${val}`);
+  }
+
+  const dimPath = parts.join(', ');
+
+  // Get the display name for the aggregate
+  let displayAgg: string | undefined;
+  if (aggregateName) {
+    // Look up the aggregate info to get the label
+    const aggInfo = aggregates.find(a => a.name === aggregateName);
+    if (aggInfo?.label) {
+      // Use custom label if provided
+      displayAgg = aggInfo.label;
+    } else if (aggInfo) {
+      // Build display from measure + aggregation
+      if (aggInfo.aggregation === 'count') {
+        displayAgg = 'count';
+      } else {
+        displayAgg = `${aggInfo.measure}.${aggInfo.aggregation}`;
+      }
+    } else {
+      // Fallback: clean up the internal name
+      displayAgg = aggregateName
+        .replace(/^__pending___/, '')  // Remove pending prefix
+        .replace(/_/g, '.');
+    }
+  } else if (aggregates.length === 1) {
+    // Single aggregate - still show it in tooltip
+    const aggInfo = aggregates[0];
+    if (aggInfo.label) {
+      displayAgg = aggInfo.label;
+    } else if (aggInfo.aggregation === 'count') {
+      displayAgg = 'count';
+    } else {
+      displayAgg = `${aggInfo.measure}.${aggInfo.aggregation}`;
+    }
+  }
+
+  if (displayAgg) {
+    return dimPath ? `${dimPath} → ${displayAgg}` : displayAgg;
+  }
+
+  return dimPath;
+}
+
+/**
  * Render a single data cell.
  */
 function renderDataCell(
@@ -629,7 +695,13 @@ function renderDataCell(
   }
 
   const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
-  lines.push(`<td${classAttr}>${escapeHTML(cell.formatted)}</td>`);
+
+  // Build cell path attributes for tooltip and programmatic access
+  const humanPath = buildHumanPath(rowValues, colValues, aggregateName, grid.aggregates);
+  const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
+  const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
+
+  lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
 }
 
 /**
@@ -653,12 +725,18 @@ function renderDataCells(
   if (rowAgg) {
     // Single aggregate cell based on row header
     const cell = grid.getCell(rowValues, colValues, rowAgg);
-    lines.push(`<td${classAttr}>${escapeHTML(cell.formatted)}</td>`);
+    const humanPath = buildHumanPath(rowValues, colValues, rowAgg, grid.aggregates);
+    const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
+    const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
+    lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
   } else {
     // Multiple aggregate cells
     for (const agg of grid.aggregates) {
       const cell = grid.getCell(rowValues, colValues, agg.name);
-      lines.push(`<td${classAttr}>${escapeHTML(cell.formatted)}</td>`);
+      const humanPath = buildHumanPath(rowValues, colValues, agg.name, grid.aggregates);
+      const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
+      const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
+      lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
     }
   }
 }

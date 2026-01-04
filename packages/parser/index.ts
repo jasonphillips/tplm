@@ -6,9 +6,14 @@
  * PEG (Peggy) parser available as fallback.
  */
 
-import { parse as parseChevrotain, parseWithErrors as parseChevrotainWithErrors } from './chevrotain-parser.js';
+import {
+  parse as parseChevrotain,
+  parseWithErrors as parseChevrotainWithErrors,
+  parseProgram as parseProgramChevrotain,
+  parseProgramWithErrors as parseProgramChevrotainWithErrors,
+} from './chevrotain-parser.js';
 import { parse as parsePeggy } from './parser.js';
-import type { TPLStatement } from './ast.js';
+import type { TPLStatement, TPLProgram } from './ast.js';
 
 export type ParserType = 'chevrotain' | 'peggy';
 
@@ -41,11 +46,30 @@ export function parseWithErrors(input: string) {
   return parseChevrotainWithErrors(input);
 }
 
+/**
+ * Parse a full TPL program (DIMENSION and TABLE statements).
+ * Chevrotain parser only.
+ *
+ * @param input - The TPL source code to parse
+ * @returns The parsed TPLProgram AST
+ */
+export function parseProgram(input: string): TPLProgram {
+  return parseProgramChevrotain(input);
+}
+
+/**
+ * Parse program with error recovery (Chevrotain only).
+ * Returns partial results even if parsing fails.
+ */
+export function parseProgramWithErrors(input: string) {
+  return parseProgramChevrotainWithErrors(input);
+}
+
 // Re-export types
 export * from './ast.js';
 
 // Re-export individual parsers for direct access
-export { parseChevrotain, parsePeggy };
+export { parseChevrotain, parsePeggy, parseProgramChevrotain };
 
 // Re-export prettifier
 export { formatTPL } from './prettifier.js';

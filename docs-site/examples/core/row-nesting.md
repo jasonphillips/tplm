@@ -11,6 +11,7 @@ The `*` operator nests dimensions to create hierarchies. Here occupation contain
   :editor-rows="2"
   label="Try It"
   :variations="[
+    { label: 'Show median and P95 income', query: 'TABLE ROWS occupation * gender COLS education * (income.p50 | income.p95);' },
     { label: 'Reverse nesting: gender containing occupation', query: 'TABLE ROWS gender * occupation COLS education * income.sum;' },
     { label: 'Add a third level: occupation > gender > education', query: 'TABLE ROWS occupation * gender * education COLS income.sum;' },
     { label: 'Multiple measures in hierarchy', query: 'TABLE ROWS occupation * gender COLS education * (income.sum | income.mean);' }

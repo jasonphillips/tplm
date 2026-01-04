@@ -1,11 +1,75 @@
 /**
  * TPL Abstract Syntax Tree Type Definitions
- * 
+ *
  * These types represent the parsed structure of a TPL statement.
  */
 
 // ---
-// TOP-LEVEL
+// TOP-LEVEL PROGRAM
+// ---
+
+/**
+ * A TPL program can contain dimension definitions and table statements.
+ * Dimensions are defined once and can be used across multiple tables.
+ */
+export interface TPLProgram {
+  dimensions: DimensionDef[];
+  tables: TPLStatement[];
+}
+
+// ---
+// DIMENSION DEFINITIONS
+// ---
+
+/**
+ * A bucket/category in a dimension definition.
+ * Maps a condition to a label value.
+ *
+ * Example: '<HS' WHEN < 12
+ *   - label: '<HS'
+ *   - operator: '<'
+ *   - value: '12'
+ *
+ * Example: 'Married' WHEN >= 1 AND <= 3
+ *   - label: 'Married'
+ *   - condition: '>= 1 AND <= 3' (raw condition string)
+ */
+export interface DimensionBucket {
+  label: string;
+  /** Raw condition string (e.g., "< 12", "= 12", ">= 1 AND <= 3") */
+  condition: string;
+}
+
+/**
+ * A dimension definition.
+ * Dimensions can be simple aliases or bucketed (categorical) mappings.
+ *
+ * Simple alias example:
+ *   DIMENSION gender FROM gendchar;
+ *   - name: 'gender'
+ *   - sourceColumn: 'gendchar'
+ *   - buckets: undefined
+ *
+ * Bucketed example:
+ *   DIMENSION education FROM educ
+ *     '<HS' WHEN < 12
+ *     'HS' WHEN = 12
+ *     'College' WHEN >= 13
+ *   ;
+ *   - name: 'education'
+ *   - sourceColumn: 'educ'
+ *   - buckets: [{ label: '<HS', condition: '< 12' }, ...]
+ */
+export interface DimensionDef {
+  type: 'dimension_def';
+  name: string;
+  sourceColumn: string;
+  buckets?: DimensionBucket[];
+  elseValue?: string | null;
+}
+
+// ---
+// TOP-LEVEL TABLE STATEMENT
 // ---
 
 /**
@@ -193,7 +257,14 @@ export type AggregationMethod =
   | 'stdev'
   | 'pct'
   | 'pctn'
-  | 'pctsum';
+  | 'pctsum'
+  // Percentile aggregations (require window function workaround)
+  | 'p25'
+  | 'p50'
+  | 'p75'
+  | 'p90'
+  | 'p95'
+  | 'p99';
 
 export type FormatSpec =
   | { type: 'currency' }
@@ -329,6 +400,10 @@ export function isRatioExpr(value: any): value is RatioExpr {
 
 export function isAggregateExpr(value: any): value is AggregateExpr {
   return value && typeof value === 'object' && value.type === 'aggregateExpr';
+}
+
+export function isDimensionDef(value: any): value is DimensionDef {
+  return value && typeof value === 'object' && value.type === 'dimension_def';
 }
 
 // ---

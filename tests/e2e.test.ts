@@ -401,8 +401,8 @@ describe('E2E Pipeline Tests', () => {
       const tpl = 'TABLE ROWS state[-3] * births.sum COLS year[-2];';
       const result = await runPipeline(tpl);
 
-      // Data cells should contain numeric values
-      expect(result.html).toMatch(/<td>[^<]*\d+[^<]*<\/td>/);
+      // Data cells should contain numeric values (with optional attributes)
+      expect(result.html).toMatch(/<td[^>]*>[^<]*\d+[^<]*<\/td>/);
     });
   });
 });

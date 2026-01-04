@@ -11,6 +11,7 @@ The fundamental TPL pattern: row dimensions crossed with column dimensions to cr
   :editor-rows="2"
   label="Try It"
   :variations="[
+    { label: 'Median income instead', query: 'TABLE ROWS occupation COLS education * income.p50;' },
     { label: 'Swap rows and columns', query: 'TABLE ROWS education COLS occupation * income.sum;' },
     { label: 'Use mean instead of sum', query: 'TABLE ROWS occupation COLS education * income.mean;' },
     { label: 'Different dimensions: gender by education', query: 'TABLE ROWS gender COLS education * income.sum;' },

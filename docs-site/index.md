@@ -41,8 +41,8 @@ One line describes the table structure. TPL handles the rest - generating effici
 
 <Playground
   initial-query="TABLE
-  ROWS education * gender * (income.sum ACROSS COLS):percent
-  COLS occupation[-3@income.sum]
+  ROWS occupation[-5@income.sum] * (income.sum ACROSS COLS)
+  COLS education
 ;"
   :auto-run="true"
   :show-tabs="true"
@@ -52,13 +52,13 @@ One line describes the table structure. TPL handles the rest - generating effici
 
 <Playground
   initial-query="TABLE
-  ROWS occupation * gender * n
-  COLS education | ALL 'Total'
+  ROWS occupation * income.(p50 | p95):currency
+  COLS gender
 ;"
   :auto-run="true"
   :show-tabs="true"
   :show-timing="true"
-  label="Record Counts with Totals"
+  label="Median vs 95th Percentile Income"
 />
 
 ## How It Works
@@ -79,6 +79,7 @@ You write one declaration. TPL compiles it to efficient database queries, execut
 | `ALL`          | Totals      | `(occupation \| ALL)` (add total row)                   |
 | `[-N@field]`   | Top N       | `occupation[-5@income.sum]` (top 5 by income)           |
 | `.sum` `.mean` | Aggregate   | `income.sum`, `income.(sum \| mean)`                    |
+| `.p50` `.p95`  | Percentiles | `income.p50` (median), `income.(p25 \| p75)`            |
 | `ACROSS`       | Percentages | `(income.sum ACROSS COLS)` (row percentages)            |
 
 ### Common Patterns
@@ -89,6 +90,9 @@ TABLE ROWS occupation * income.sum COLS education;
 
 -- Top 5 with totals
 TABLE ROWS occupation[-5@income.sum] * income.sum COLS education | ALL;
+
+-- Statistical summary with percentiles
+TABLE ROWS occupation * income.(p25 | p50 | p75 | p95) COLS gender;
 
 -- Row percentages (each row sums to 100%)
 TABLE ROWS occupation * (income.sum ACROSS COLS) COLS education;

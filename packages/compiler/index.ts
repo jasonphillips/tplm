@@ -58,4 +58,37 @@ export {
   buildGridSpec,
   printGridSpec,
   type QueryResults,
+  type BuildGridSpecOptions,
 } from './grid-spec-builder.js';
+
+// percentile support
+export {
+  analyzeAndGeneratePercentileConfig,
+  findPercentileAggregations,
+  findDimensions,
+  findPartitionLevels,
+  findCollapsedDimensions,
+  generatePercentileSourceSQL,
+  generateMultiLevelPercentileSQL,
+  generatePercentileMalloySource,
+  transformTPLForPercentiles,
+  postProcessMalloyForPercentiles,
+  isPercentileMethod,
+  PERCENTILE_METHODS,
+  PERCENTILE_VALUES,
+  PERCENTILE_LABELS,
+  type PercentileInfo,
+  type PercentileConfig,
+  type PartitionLevel,
+  type SqlDialect,
+} from './percentile-utils.js';
+
+// dimension utilities (for percentile partitioning and ordering)
+export {
+  malloyPickToSqlCase,
+  parseDimensionMappings,
+  detectDimensionOrdering,
+  type DimensionInfo,
+  type DimensionOrderingProvider,
+} from './dimension-utils.js';
+

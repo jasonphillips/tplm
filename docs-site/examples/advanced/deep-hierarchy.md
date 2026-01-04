@@ -11,6 +11,7 @@ Multiple nesting levels with totals at each level using the `(dimension | ALL)` 
   :editor-rows="5"
   label="Try It"
   :variations="[
+    { label: 'Percentile distribution', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS (occupation[-5@income.sum] | ALL) * (gender | ALL)\n  COLS (education | ALL) * income.(p50 | p95)\n;' },
     { label: 'Three Row Levels', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS occupation * gender * education * income.sum\n  COLS sector_label\n;' },
     { label: 'Totals at All Levels', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS (occupation | ALL) * (gender | ALL) * (education | ALL) * income.sum\n;' },
     { label: 'Without Row Totals', query: 'TABLE\n  WHERE occupation IS NOT NULL\n  ROWS occupation[-5@income.sum] * gender\n  COLS (education | ALL) * income.sum\n;' }

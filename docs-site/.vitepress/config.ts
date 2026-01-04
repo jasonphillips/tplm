@@ -27,13 +27,17 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: "Quick Start", link: "/getting-started/quick-start" },
+          { text: "Data Model", link: "/getting-started/data-model" },
           { text: "Playground", link: "/playground" },
         ],
       },
       {
         text: "Syntax",
         collapsed: false,
-        items: [{ text: "Overview", link: "/syntax/overview" }],
+        items: [
+          { text: "Overview", link: "/syntax/overview" },
+          { text: "DIMENSION", link: "/syntax/dimensions" },
+        ],
       },
       {
         text: "Core Concepts",
@@ -91,6 +95,24 @@ export default defineConfig({
           },
           { text: "Nested Limits", link: "/examples/limits/nested-limits" },
           { text: "Column Limits", link: "/examples/limits/column-limits" },
+        ],
+      },
+      {
+        text: "Percentiles",
+        collapsed: true,
+        items: [
+          {
+            text: "Median (P50)",
+            link: "/examples/percentiles/median",
+          },
+          {
+            text: "Interquartile Range",
+            link: "/examples/percentiles/iqr",
+          },
+          {
+            text: "Statistical Summary",
+            link: "/examples/percentiles/statistical-summary",
+          },
         ],
       },
       {
@@ -187,7 +209,10 @@ export default defineConfig({
       {
         text: "Styling",
         collapsed: false,
-        items: [{ text: "CSS Reference", link: "/styling/css-reference" }],
+        items: [
+          { text: "CSS Reference", link: "/styling/css-reference" },
+          { text: "Cell Data Attributes", link: "/styling/cell-data-attributes" },
+        ],
       },
     ],
 

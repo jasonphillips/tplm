@@ -29,16 +29,28 @@ import {
 } from './table-spec.js';
 import { LimitSpec, OrderSpec, AggregateExpr, OrderByExpression, AggregationMethod } from '../parser/ast.js';
 import { escapeFieldName, buildAggExpression, buildPercentageAggExpression } from './multi-query-utils.js';
+import type { DimensionOrderingProvider } from './dimension-utils.js';
 
 // ---
 // ORDER-BY HELPERS
 // ---
 
+// Module-level ordering provider for current query generation.
+// Set by generateMalloyQueries and used by buildOrderByExpression.
+let currentOrderingProvider: DimensionOrderingProvider | undefined;
+
+// Module-level flag for NULL filtering in column dimensions.
+// Set by generateMalloyQueries and used by buildNestClause.
+// When false (default), each nest adds a WHERE clause filtering out NULL values
+// for its specific column dimensions.
+let currentIncludeNulls: boolean = false;
+
 /**
  * Build the order_by field for a limit.
  *
  * - If limit.orderBy is specified, use that (field or aggregate expression)
- * - If no orderBy, order by the dimension name (alphabetic sort)
+ * - If no orderBy and dimension has definition order, use definition order
+ * - Otherwise, order by the dimension name (alphabetic sort)
  *
  * @param limit The limit spec (may have orderBy)
  * @param dimensionName The dimension being limited (for alphabetic fallback)
@@ -52,23 +64,42 @@ function buildOrderByField(limit: LimitSpec, dimensionName: string): string {
  * Build the order_by field for an order spec (without limit).
  *
  * - If order.orderBy is specified, use that (field or aggregate expression)
- * - If no orderBy, order by the dimension name (alphabetic sort)
+ * - If no orderBy and dimension has definition order, use definition order
+ * - Otherwise, order by the dimension name (alphabetic sort)
  *
  * @param order The order spec (may have orderBy)
  * @param dimensionName The dimension being ordered (for alphabetic fallback)
  * @returns The Malloy order_by field expression
  */
 function buildOrderByFieldFromOrder(order: OrderSpec, dimensionName: string): string {
-  return buildOrderByExpression(order.orderBy, dimensionName);
+  // For explicit orders (without limits), use definition order as fallback
+  return buildOrderByExpression(order.orderBy, dimensionName, true);
 }
 
 /**
  * Build the order_by field expression from an orderBy value.
  * Shared logic for both limits and orders.
+ *
+ * @param orderBy The orderBy expression (field name, aggregate, ratio, or undefined)
+ * @param dimensionName The dimension being ordered (for alphabetic fallback)
+ * @param useDefinitionOrder If true and no orderBy specified, use definition order if available
+ *                           (only for explicit orders, not for limits)
  */
-function buildOrderByExpression(orderBy: string | OrderByExpression | undefined, dimensionName: string): string {
+function buildOrderByExpression(
+  orderBy: string | OrderByExpression | undefined,
+  dimensionName: string,
+  useDefinitionOrder: boolean = false
+): string {
   if (!orderBy) {
-    // No explicit orderBy - order alphabetically by the dimension
+    // No explicit orderBy - check if we should use definition order
+    if (useDefinitionOrder && currentOrderingProvider?.hasDefinitionOrder(dimensionName)) {
+      // Use the ordering dimension for definition-order sorting
+      const orderDimName = currentOrderingProvider.getOrderDimensionName(dimensionName);
+      if (orderDimName) {
+        return escapeFieldName(orderDimName);
+      }
+    }
+    // Fall back to alphabetic order by the dimension
     return escapeFieldName(dimensionName);
   }
 
@@ -834,6 +865,20 @@ export interface GenerateMalloyOptions {
    * First-declared axis gets global limits, second gets per-parent limits.
    */
   firstAxis?: 'row' | 'col';
+
+  /**
+   * Ordering provider for definition-order sorting.
+   * When provided with hasDefinitionOrder() returning true for a dimension,
+   * that dimension will be sorted by definition order instead of alphabetically.
+   */
+  orderingProvider?: DimensionOrderingProvider;
+
+  /**
+   * If true, don't add NULL filters for dimensions.
+   * When false (default), each nest adds a WHERE clause filtering out NULL values
+   * for its specific column dimensions.
+   */
+  includeNulls?: boolean;
 }
 
 /**
@@ -841,7 +886,7 @@ export interface GenerateMalloyOptions {
  *
  * @param plan The query plan
  * @param sourceName The Malloy source name (e.g., 'names')
- * @param options Optional settings including WHERE clause
+ * @param options Optional settings including WHERE clause and dimension registry
  * @returns Array of Malloy query specifications
  */
 export function generateMalloyQueries(
@@ -850,17 +895,29 @@ export function generateMalloyQueries(
   options: GenerateMalloyOptions = {}
 ): MalloyQuerySpec[] {
   const firstAxis = options.firstAxis ?? 'row';
-  return plan.queries.map(query => {
-    const result = buildMalloyFromSpec(query, sourceName, options.where, firstAxis);
-    return {
-      id: query.id,
-      malloy: result.malloy,
-      rowGroupings: query.rowGroupings,
-      colGroupings: query.colGroupings,
-      axesInverted: result.axesInverted,
-      isFlatQuery: result.isFlatQuery,
-    };
-  });
+
+  // Set module-level ordering provider for definition-order sorting
+  currentOrderingProvider = options.orderingProvider;
+  // Set module-level flag for NULL filtering (default: add NULL filters)
+  currentIncludeNulls = options.includeNulls ?? false;
+
+  try {
+    return plan.queries.map(query => {
+      const result = buildMalloyFromSpec(query, sourceName, options.where, firstAxis);
+      return {
+        id: query.id,
+        malloy: result.malloy,
+        rowGroupings: query.rowGroupings,
+        colGroupings: query.colGroupings,
+        axesInverted: result.axesInverted,
+        isFlatQuery: result.isFlatQuery,
+      };
+    });
+  } finally {
+    // Clear the module-level state after query generation
+    currentOrderingProvider = undefined;
+    currentIncludeNulls = false;
+  }
 }
 
 interface BuildMalloyResult {
@@ -1044,8 +1101,19 @@ function buildRestructuredQueryForColLimit(
 
   lines.push(`run: ${sourceName} -> {`);
 
-  if (where) {
-    lines.push(`  where: ${where}`);
+  // Build WHERE clause: combine user's where + NULL filters for colsBefore dimensions
+  let fullWhere = where;
+  if (!currentIncludeNulls && colsBefore.length > 0) {
+    const colsBeforeNullFilters = colsBefore
+      .map(g => `${escapeFieldName(g.dimension)} is not null`)
+      .join(' and ');
+    fullWhere = fullWhere
+      ? `(${fullWhere}) and ${colsBeforeNullFilters}`
+      : colsBeforeNullFilters;
+  }
+
+  if (fullWhere) {
+    lines.push(`  where: ${fullWhere}`);
   }
 
   // Column dimensions BEFORE the limited one become outer group_by
@@ -1070,6 +1138,15 @@ function buildRestructuredQueryForColLimit(
   const nestName = `by_${limitedColGrouping.dimension}`;
   lines.push(`  nest: ${nestName} is {`);
 
+  // Add WHERE clause for NULL filter on the limited dimension (and colsAfter dims)
+  if (!currentIncludeNulls) {
+    const limitedAndAfterDims = [limitedColGrouping, ...colsAfter];
+    const nullFilters = limitedAndAfterDims
+      .map(g => `${escapeFieldName(g.dimension)} is not null`)
+      .join(' and ');
+    lines.push(`    where: ${nullFilters}`);
+  }
+
   // Group by the limited dimension
   if (limitedColGrouping.label && limitedColGrouping.label !== limitedColGrouping.dimension) {
     lines.push(`    group_by: \`${limitedColGrouping.label}\` is ${limitedEscaped}`);
@@ -1089,7 +1166,8 @@ function buildRestructuredQueryForColLimit(
   // Nest remaining col dimensions (colsAfter) first, then row dimensions inside those
   // This maintains the col axis hierarchy: state > gender, with year inside
   if (colsAfter.length > 0) {
-    const colNestLines = buildColNestForRestructured(colsAfter, query.aggregates, query.rowGroupings, '    ');
+    // Pass empty array to skip NULL filters (already handled above)
+    const colNestLines = buildColNestForRestructured(colsAfter, query.aggregates, query.rowGroupings, '    ', []);
     lines.push(...colNestLines);
   } else if (query.rowGroupings.length > 0) {
     // No remaining col dimensions, just nest row dimensions directly
@@ -1224,6 +1302,18 @@ function buildRowNestForRestructured(
   const firstRowGroup = rowGroupings[0];
   const remainingRowGroups = rowGroupings.slice(1);
 
+  // Check if we need a definition-order aggregate
+  // Use it when: no explicit order specified AND dimension has definition order
+  // This applies to both limited and unlimited queries
+  let defOrderAgg: { name: string; dimName: string } | null = null;
+  const hasExplicitOrder = firstRowGroup.limit?.orderBy || firstRowGroup.order?.orderBy;
+  if (!hasExplicitOrder && currentOrderingProvider?.hasDefinitionOrder(firstRowGroup.dimension)) {
+    const orderDimName = currentOrderingProvider.getOrderDimensionName(firstRowGroup.dimension);
+    if (orderDimName) {
+      defOrderAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+    }
+  }
+
   // Create nest for the first row dimension
   const escaped = escapeFieldName(firstRowGroup.dimension);
   const nestName = `by_${firstRowGroup.dimension}`;
@@ -1243,6 +1333,10 @@ function buildRowNestForRestructured(
     const escapedName = escapeFieldName(agg.name);
     result.push(`${baseIndent}    ${escapedName} is ${expr}`);
   }
+  // Add definition-order aggregate inside the same aggregate block
+  if (defOrderAgg) {
+    result.push(`${baseIndent}    ${escapeFieldName(defOrderAgg.name)} is ${escapeFieldName(defOrderAgg.dimName)}.min()`);
+  }
 
   // Recursively nest remaining row dimensions, with columns at the innermost level
   if (remainingRowGroups.length > 0) {
@@ -1257,13 +1351,21 @@ function buildRowNestForRestructured(
   // Apply limit if this row grouping has one
   if (firstRowGroup.limit) {
     const orderDir = firstRowGroup.limit.direction === 'desc' ? 'desc' : 'asc';
-    const orderField = buildOrderByField(firstRowGroup.limit, firstRowGroup.dimension);
+    // Use definition-order aggregate if available and no explicit orderBy
+    const orderField = defOrderAgg && !firstRowGroup.limit.orderBy
+      ? escapeFieldName(defOrderAgg.name)
+      : buildOrderByField(firstRowGroup.limit, firstRowGroup.dimension);
     result.push(`${baseIndent}  order_by: ${orderField} ${orderDir}`);
     result.push(`${baseIndent}  limit: ${firstRowGroup.limit.count}`);
   } else if (firstRowGroup.order?.direction) {
-    // Explicit order without limit
-    const orderField = buildOrderByFieldFromOrder(firstRowGroup.order, firstRowGroup.dimension);
+    // Explicit order without limit - use definition order if available
+    const orderField = defOrderAgg && !firstRowGroup.order.orderBy
+      ? escapeFieldName(defOrderAgg.name)
+      : buildOrderByFieldFromOrder(firstRowGroup.order, firstRowGroup.dimension);
     result.push(`${baseIndent}  order_by: ${orderField} ${firstRowGroup.order.direction}`);
+  } else if (defOrderAgg) {
+    // Use the definition-order aggregate that was already added
+    result.push(`${baseIndent}  order_by: ${escapeFieldName(defOrderAgg.name)} asc`);
   }
 
   result.push(`${baseIndent}}`);
@@ -1275,12 +1377,16 @@ function buildRowNestForRestructured(
  * Build a nest clause for column dimensions in a restructured query.
  * Row groupings are nested inside the innermost column dimension.
  * This is the mirror of buildRowNestForRestructured for col-first queries.
+ *
+ * @param allColDimensions Optional - pass all column dimensions on first call for NULL filter.
+ *                         On recursive calls, this is undefined.
  */
 function buildColNestForRestructured(
   colGroupings: GroupingInfo[],
   aggregates: AggregateInfo[],
   rowGroupings: GroupingInfo[] = [],
-  baseIndent: string = '  '
+  baseIndent: string = '  ',
+  allColDimensions?: string[]
 ): string[] {
   if (colGroupings.length === 0) return [];
 
@@ -1288,10 +1394,26 @@ function buildColNestForRestructured(
   const firstColGroup = colGroupings[0];
   const remainingColGroups = colGroupings.slice(1);
 
+  // Build NULL filter for first call only
+  const colDimsForFilter = allColDimensions ?? colGroupings.map(g => g.dimension);
+  const isFirstLevel = allColDimensions === undefined;
+  let colNullFilterWhere: string | null = null;
+  if (isFirstLevel && !currentIncludeNulls && colDimsForFilter.length > 0) {
+    const nullFilters = colDimsForFilter
+      .map(dim => `${escapeFieldName(dim)} is not null`)
+      .join(' and ');
+    colNullFilterWhere = nullFilters;
+  }
+
   // Create nest for the first column dimension
   const escaped = escapeFieldName(firstColGroup.dimension);
   const nestName = `by_${firstColGroup.dimension}`;
   result.push(`${baseIndent}nest: ${nestName} is {`);
+
+  // Add WHERE clause for column NULL filters at the first level only.
+  if (colNullFilterWhere) {
+    result.push(`${baseIndent}  where: ${colNullFilterWhere}`);
+  }
 
   // Group by this dimension
   if (firstColGroup.label && firstColGroup.label !== firstColGroup.dimension) {
@@ -1300,17 +1422,34 @@ function buildColNestForRestructured(
     result.push(`${baseIndent}  group_by: ${escaped}`);
   }
 
-  // Add aggregates
+  // Check if we need a definition-order aggregate (before building aggregates)
+  // Use it when: no explicit order specified AND dimension has definition order
+  // This applies to both limited and unlimited queries
+  let defOrderAgg: { name: string; dimName: string } | null = null;
+  const hasExplicitOrder = firstColGroup.limit?.orderBy || firstColGroup.order?.orderBy;
+  if (!hasExplicitOrder && currentOrderingProvider?.hasDefinitionOrder(firstColGroup.dimension)) {
+    const orderDimName = currentOrderingProvider.getOrderDimensionName(firstColGroup.dimension);
+    if (orderDimName) {
+      defOrderAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+    }
+  }
+
+  // Add aggregates (including ordering aggregate if needed)
   result.push(`${baseIndent}  aggregate:`);
   for (const agg of aggregates) {
     const expr = buildAggExpression(agg.measure, agg.aggregation);
     const escapedName = escapeFieldName(agg.name);
     result.push(`${baseIndent}    ${escapedName} is ${expr}`);
   }
+  // Add ordering aggregate inside the same aggregate block
+  if (defOrderAgg) {
+    result.push(`${baseIndent}    ${escapeFieldName(defOrderAgg.name)} is ${escapeFieldName(defOrderAgg.dimName)}.min()`);
+  }
 
   // Recursively nest remaining column dimensions, with rows at the innermost level
   if (remainingColGroups.length > 0) {
-    const innerColLines = buildColNestForRestructured(remainingColGroups, aggregates, rowGroupings, baseIndent + '  ');
+    // Pass empty array to signal this is not the first level (NULL filters already added)
+    const innerColLines = buildColNestForRestructured(remainingColGroups, aggregates, rowGroupings, baseIndent + '  ', []);
     result.push(...innerColLines);
   } else if (rowGroupings.length > 0) {
     // No more column dimensions - nest rows here
@@ -1321,13 +1460,21 @@ function buildColNestForRestructured(
   // Apply limit if this column grouping has one
   if (firstColGroup.limit) {
     const orderDir = firstColGroup.limit.direction === 'desc' ? 'desc' : 'asc';
-    const orderField = buildOrderByField(firstColGroup.limit, firstColGroup.dimension);
+    // Use definition-order aggregate if available and no explicit orderBy
+    const orderField = defOrderAgg && !firstColGroup.limit.orderBy
+      ? escapeFieldName(defOrderAgg.name)
+      : buildOrderByField(firstColGroup.limit, firstColGroup.dimension);
     result.push(`${baseIndent}  order_by: ${orderField} ${orderDir}`);
     result.push(`${baseIndent}  limit: ${firstColGroup.limit.count}`);
   } else if (firstColGroup.order?.direction) {
-    // Explicit order without limit
-    const orderField = buildOrderByFieldFromOrder(firstColGroup.order, firstColGroup.dimension);
+    // Explicit order without limit - use definition order if available
+    const orderField = defOrderAgg && !firstColGroup.order.orderBy
+      ? escapeFieldName(defOrderAgg.name)
+      : buildOrderByFieldFromOrder(firstColGroup.order, firstColGroup.dimension);
     result.push(`${baseIndent}  order_by: ${orderField} ${firstColGroup.order.direction}`);
+  } else if (defOrderAgg) {
+    // Use the already-added ordering aggregate
+    result.push(`${baseIndent}  order_by: ${escapeFieldName(defOrderAgg.name)} asc`);
   }
 
   result.push(`${baseIndent}}`);
@@ -1346,6 +1493,16 @@ function buildNestClauseWithIndent(
 ): string[] {
   if (colGroupings.length === 0) return [];
 
+  // Build NULL filter WHERE clause for column dimensions if needed.
+  const colDimensions = colGroupings.map(g => g.dimension);
+  let colNullFilterWhere: string | null = null;
+  if (!currentIncludeNulls && colDimensions.length > 0) {
+    const nullFilters = colDimensions
+      .map(dim => `${escapeFieldName(dim)} is not null`)
+      .join(' and ');
+    colNullFilterWhere = nullFilters;
+  }
+
   // Build nested structure for column groupings
   function buildLevel(groupings: GroupingInfo[], level: number): string[] {
     if (groupings.length === 0) return [];
@@ -1358,6 +1515,11 @@ function buildNestClauseWithIndent(
     const nestName = `by_${currentGroup.dimension}`;
     result.push(`${indent}nest: ${nestName} is {`);
 
+    // Add WHERE clause for column NULL filters at the first nest level only.
+    if (level === 0 && colNullFilterWhere) {
+      result.push(`${indent}  where: ${colNullFilterWhere}`);
+    }
+
     const escaped = escapeFieldName(currentGroup.dimension);
     if (currentGroup.label && currentGroup.label !== currentGroup.dimension) {
       result.push(`${indent}  group_by: \`${currentGroup.label}\` is ${escaped}`);
@@ -1365,12 +1527,27 @@ function buildNestClauseWithIndent(
       result.push(`${indent}  group_by: ${escaped}`);
     }
 
-    // Add aggregates
+    // Check if we need a definition-order aggregate (before building aggregates)
+    // Use it when: no explicit order specified AND dimension has definition order
+    let defOrderAgg: { name: string; dimName: string } | null = null;
+    const hasExplicitOrder = currentGroup.limit?.orderBy || currentGroup.order?.orderBy;
+    if (!hasExplicitOrder && currentOrderingProvider?.hasDefinitionOrder(currentGroup.dimension)) {
+      const orderDimName = currentOrderingProvider.getOrderDimensionName(currentGroup.dimension);
+      if (orderDimName) {
+        defOrderAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+      }
+    }
+
+    // Add aggregates (including ordering aggregate if needed)
     result.push(`${indent}  aggregate:`);
     for (const agg of aggregates) {
       const expr = buildAggExpression(agg.measure, agg.aggregation);
       const escapedName = escapeFieldName(agg.name);
       result.push(`${indent}    ${escapedName} is ${expr}`);
+    }
+    // Add ordering aggregate inside the same aggregate block
+    if (defOrderAgg) {
+      result.push(`${indent}    ${escapeFieldName(defOrderAgg.name)} is ${escapeFieldName(defOrderAgg.dimName)}.min()`);
     }
 
     // Recurse for remaining groupings
@@ -1381,13 +1558,21 @@ function buildNestClauseWithIndent(
     // Apply limit if present and not skipping
     if (!skipLimits && currentGroup.limit) {
       const orderDir = currentGroup.limit.direction === 'desc' ? 'desc' : 'asc';
-      const orderField = buildOrderByField(currentGroup.limit, currentGroup.dimension);
+      // Use definition-order aggregate if available and no explicit orderBy
+      const orderField = defOrderAgg && !currentGroup.limit.orderBy
+        ? escapeFieldName(defOrderAgg.name)
+        : buildOrderByField(currentGroup.limit, currentGroup.dimension);
       result.push(`${indent}  order_by: ${orderField} ${orderDir}`);
       result.push(`${indent}  limit: ${currentGroup.limit.count}`);
     } else if (currentGroup.order?.direction) {
-      // Explicit order without limit
-      const orderField = buildOrderByFieldFromOrder(currentGroup.order, currentGroup.dimension);
+      // Explicit order without limit - use definition order if available
+      const orderField = defOrderAgg && !currentGroup.order.orderBy
+        ? escapeFieldName(defOrderAgg.name)
+        : buildOrderByFieldFromOrder(currentGroup.order, currentGroup.dimension);
       result.push(`${indent}  order_by: ${orderField} ${currentGroup.order.direction}`);
+    } else if (defOrderAgg) {
+      // Use the already-added ordering aggregate
+      result.push(`${indent}  order_by: ${escapeFieldName(defOrderAgg.name)} asc`);
     }
 
     result.push(`${indent}}`);
@@ -1456,13 +1641,31 @@ function buildStandardQuery(query: TaggedQuerySpec, sourceName: string, where?: 
     aggregatesToUse = ensureOrderByAggregateInList(firstRowDimWithOrder.order.orderBy, aggregatesToUse);
   }
 
+  // Check if first row dimension needs definition order (for ordering aggregate)
+  // We want definition order unless there's an explicit orderBy on the limit/order
+  let rowOrderingAgg: { name: string; dimName: string } | null = null;
+  const firstRowDim = query.rowGroupings[0]?.dimension;
+  const hasExplicitRowOrder = firstRowDimWithLimit?.limit?.orderBy || firstRowDimWithOrder?.order?.orderBy;
+  if (firstRowDim && !hasExplicitRowOrder &&
+      currentOrderingProvider?.hasDefinitionOrder(firstRowDim)) {
+    const orderDimName = currentOrderingProvider.getOrderDimensionName(firstRowDim);
+    if (orderDimName) {
+      rowOrderingAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+    }
+  }
+
   // Build aggregate clause at outer level if:
   // 1. No column groupings at all (row-only query)
   // 2. Need outer aggregate for ordering
   // 3. Have a total variant (ALL in COLS)
-  if (!hasAnyColGroupings || needsOuterAggregate || hasTotalVariant) {
+  // 4. Need ordering aggregate for definition order
+  if (!hasAnyColGroupings || needsOuterAggregate || hasTotalVariant || rowOrderingAgg) {
     const aggLines = buildAggregateLines(aggregatesToUse, '  ', query.rowGroupings, query.colGroupings);
     lines.push(...aggLines);
+    // Add ordering aggregate if needed
+    if (rowOrderingAgg) {
+      lines.push(`    ${escapeFieldName(rowOrderingAgg.name)} is ${escapeFieldName(rowOrderingAgg.dimName)}.min()`);
+    }
   }
 
   // Build nest clauses for all column variants that have groupings
@@ -1477,7 +1680,10 @@ function buildStandardQuery(query: TaggedQuerySpec, sourceName: string, where?: 
   if (firstRowDimWithLimit) {
     const g = firstRowDimWithLimit;
     const orderDir = g.limit!.direction === 'desc' ? 'desc' : 'asc';
-    const orderField = buildOrderByField(g.limit!, g.dimension);
+    // Use definition-order aggregate if available and no explicit orderBy
+    const orderField = rowOrderingAgg && !g.limit!.orderBy
+      ? escapeFieldName(rowOrderingAgg.name)
+      : buildOrderByField(g.limit!, g.dimension);
     lines.push(`  order_by: ${orderField} ${orderDir}`);
     lines.push(`  limit: ${g.limit!.count}`);
   } else if (groupByDims.length > 0) {
@@ -1486,6 +1692,9 @@ function buildStandardQuery(query: TaggedQuerySpec, sourceName: string, where?: 
     if (firstDimWithOrder && firstDimWithOrder.order) {
       const orderField = buildOrderByFieldFromOrder(firstDimWithOrder.order, firstDimWithOrder.dimension);
       lines.push(`  order_by: ${orderField} ${firstDimWithOrder.order.direction}`);
+    } else if (rowOrderingAgg) {
+      // Use the ordering aggregate that was already added above
+      lines.push(`  order_by: ${escapeFieldName(rowOrderingAgg.name)} asc`);
     }
     // No explicit limit - add a high default limit to avoid Malloy's default 10-row limit.
     // This ensures all row dimension combinations are returned.
@@ -1537,8 +1746,21 @@ function buildFlatQuery(query: TaggedQuerySpec, sourceName: string, where?: stri
 
   lines.push(`run: ${sourceName} -> {`);
 
-  if (where) {
-    lines.push(`  where: ${where}`);
+  // For flat queries, we need to add column dimension null filters to the WHERE clause.
+  // Unlike nested queries where column filters go into each nest, flat queries put all
+  // dimensions in a single group_by, so we need all null filters at the top level.
+  let fullWhere = where;
+  if (!currentIncludeNulls && query.colGroupings.length > 0) {
+    const colNullFilters = query.colGroupings
+      .map(g => `${escapeFieldName(g.dimension)} is not null`)
+      .join(' and ');
+    fullWhere = fullWhere
+      ? `${fullWhere} and ${colNullFilters}`
+      : colNullFilters;
+  }
+
+  if (fullWhere) {
+    lines.push(`  where: ${fullWhere}`);
   }
 
   // Put ALL dimensions in a single group_by
@@ -1571,6 +1793,18 @@ function buildFlatQuery(query: TaggedQuerySpec, sourceName: string, where?: stri
   const firstColLimit = query.colGroupings.find(g => g.limit);
   const primaryLimit = firstRowLimit ?? firstColLimit;
 
+  // Check if we need a definition-order aggregate (before building aggregates)
+  // We want definition order unless there's an explicit orderBy on the limit
+  let defOrderAgg: { name: string; dimName: string } | null = null;
+  const hasExplicitOrder = primaryLimit?.limit?.orderBy;
+  const firstDim = query.rowGroupings[0]?.dimension ?? query.colGroupings[0]?.dimension;
+  if (!hasExplicitOrder && firstDim && currentOrderingProvider?.hasDefinitionOrder(firstDim)) {
+    const orderDimName = currentOrderingProvider.getOrderDimensionName(firstDim);
+    if (orderDimName) {
+      defOrderAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+    }
+  }
+
   // Build aggregates with all dimensions in scope
   // Ensure the orderBy aggregate is included (it might not be displayed but is needed for ordering)
   let aggregatesToUse = query.aggregates;
@@ -1580,12 +1814,24 @@ function buildFlatQuery(query: TaggedQuerySpec, sourceName: string, where?: stri
   const aggLines = buildAggregateLines(aggregatesToUse, '  ', query.rowGroupings, query.colGroupings);
   lines.push(...aggLines);
 
+  // Add ordering aggregate inside the same aggregate block
+  if (defOrderAgg) {
+    lines.push(`    ${escapeFieldName(defOrderAgg.name)} is ${escapeFieldName(defOrderAgg.dimName)}.min()`);
+  }
+
   if (primaryLimit?.limit) {
     const orderDir = primaryLimit.limit.direction === 'desc' ? 'desc' : 'asc';
-    const orderField = buildOrderByField(primaryLimit.limit, primaryLimit.dimension);
+    // Use definition-order aggregate if available and no explicit orderBy
+    const orderField = defOrderAgg && !primaryLimit.limit.orderBy
+      ? escapeFieldName(defOrderAgg.name)
+      : buildOrderByField(primaryLimit.limit, primaryLimit.dimension);
     lines.push(`  order_by: ${orderField} ${orderDir}`);
     lines.push(`  limit: ${primaryLimit.limit.count * 100}`);  // Higher limit for flat queries
   } else {
+    // Use the already-added ordering aggregate if present
+    if (defOrderAgg) {
+      lines.push(`  order_by: ${escapeFieldName(defOrderAgg.name)} asc`);
+    }
     lines.push(`  limit: 100000`);
   }
 
@@ -1679,6 +1925,18 @@ function buildNestClause(
   const colDimensions = colGroupings.map(g => g.dimension);
   const dimToOutputName = buildDimToOutputNameMap(rowGroupings, colGroupings);
 
+  // Build NULL filter WHERE clause for column dimensions if needed.
+  // This is where we fix the concatenation bug: each nest gets its OWN
+  // NULL filters for its specific column dimensions, rather than all
+  // column dimensions being filtered at the global level.
+  let colNullFilterWhere: string | null = null;
+  if (!currentIncludeNulls && colDimensions.length > 0) {
+    const nullFilters = colDimensions
+      .map(dim => `${escapeFieldName(dim)} is not null`)
+      .join(' and ');
+    colNullFilterWhere = nullFilters;
+  }
+
   // Helper to build aggregate expression (handles percentages)
   function buildAggExpr(agg: AggregateInfo): string {
     if (agg.isPercentage && agg.denominatorScope) {
@@ -1768,6 +2026,17 @@ function buildNestClause(
     // Check if order needs aggregates (orderBy is an expression, not just a field name)
     const orderNeedsAggregate = g.order?.orderBy && typeof g.order.orderBy !== 'string';
 
+    // Check if we need a definition-order aggregate
+    // We want definition order unless there's an explicit orderBy on the limit or explicit order direction
+    let defOrderAgg: { name: string; dimName: string } | null = null;
+    const hasExplicitOrder = g.limit?.orderBy || g.order?.direction;
+    if (!hasExplicitOrder && currentOrderingProvider?.hasDefinitionOrder(g.dimension)) {
+      const orderDimName = currentOrderingProvider.getOrderDimensionName(g.dimension);
+      if (orderDimName) {
+        defOrderAgg = { name: `${orderDimName}_min`, dimName: orderDimName };
+      }
+    }
+
     // Ensure orderBy aggregate is in the list (for both limit and order)
     let aggregatesToUse = aggregates;
     if (g.limit?.orderBy) {
@@ -1779,6 +2048,12 @@ function buildNestClause(
     const result: string[] = [];
     result.push(`${indent.repeat(depth)}nest: ${nestName} is {`);
 
+    // Add WHERE clause for column NULL filters at the first nest level only.
+    // This ensures each column section filters only on ITS dimensions.
+    if (depth === 1 && colNullFilterWhere) {
+      result.push(`${indent.repeat(depth + 1)}where: ${colNullFilterWhere}`);
+    }
+
     // Group by with label if present
     if (g.label && g.label !== g.dimension) {
       result.push(`${indent.repeat(depth + 1)}group_by: \`${g.label}\` is ${escaped}`);
@@ -1789,26 +2064,37 @@ function buildNestClause(
     // Add aggregates if:
     // 1. There's a limit at this level (needed for order_by), OR
     // 2. There's an order with aggregate expression (needed for order_by), OR
-    // 3. This is the leaf level (needed for cell values)
-    if (applyLimit || orderNeedsAggregate || isLeaf) {
+    // 3. This is the leaf level (needed for cell values), OR
+    // 4. We need a definition-order aggregate
+    if (applyLimit || orderNeedsAggregate || isLeaf || defOrderAgg) {
       result.push(`${indent.repeat(depth + 1)}aggregate:`);
       for (const agg of aggregatesToUse) {
         const expr = buildAggExpr(agg);
         const escapedName = escapeFieldName(agg.name);
         result.push(`${indent.repeat(depth + 2)}${escapedName} is ${expr}`);
       }
+      // Add definition-order aggregate inside the same aggregate block
+      if (defOrderAgg) {
+        result.push(`${indent.repeat(depth + 2)}${escapeFieldName(defOrderAgg.name)} is ${escapeFieldName(defOrderAgg.dimName)}.min()`);
+      }
     }
 
     // If there's a limit and we're not skipping limits, add order_by and limit
     if (applyLimit) {
       const orderDir = g.limit!.direction === 'desc' ? 'desc' : 'asc';
-      const orderField = buildOrderByField(g.limit!, g.dimension);
+      // Use definition-order aggregate if available and no explicit orderBy
+      const orderField = defOrderAgg && !g.limit!.orderBy
+        ? escapeFieldName(defOrderAgg.name)
+        : buildOrderByField(g.limit!, g.dimension);
       result.push(`${indent.repeat(depth + 1)}order_by: ${orderField} ${orderDir}`);
       result.push(`${indent.repeat(depth + 1)}limit: ${g.limit!.count}`);
     } else if (g.order?.direction) {
       // Explicit order without limit - add order_by only
       const orderField = buildOrderByFieldFromOrder(g.order, g.dimension);
       result.push(`${indent.repeat(depth + 1)}order_by: ${orderField} ${g.order.direction}`);
+    } else if (defOrderAgg) {
+      // Use the definition-order aggregate that was already added
+      result.push(`${indent.repeat(depth + 1)}order_by: ${escapeFieldName(defOrderAgg.name)} asc`);
     }
 
     // Recurse for next level (skip if leaf - we already added aggregates)
