@@ -31,9 +31,9 @@ import {
   DimensionValues,
   serializeTreePath,
   collectBranches,
-} from './table-spec.js';
-import { MalloyQuerySpec } from './query-plan-generator.js';
-import type { DimensionOrderingProvider } from './dimension-utils.js';
+} from "./table-spec.js";
+import { MalloyQuerySpec } from "./query-plan-generator.js";
+import type { DimensionOrderingProvider } from "./dimension-utils.js";
 
 // Module-level reference to ordering provider for definition-order sorting
 let currentOrderingProvider: DimensionOrderingProvider | undefined;
@@ -85,91 +85,107 @@ export function buildGridSpec(
   currentOrderingProvider = orderingProvider;
 
   try {
-  // Build maps of query ID to special handling flags
-  const invertedQueries = new Set<string>();
-  const flatQueries = new Set<string>();
-  if (malloyQueries) {
-    for (const mq of malloyQueries) {
-      if (mq.axesInverted) {
-        invertedQueries.add(mq.id);
-      }
-      if (mq.isFlatQuery) {
-        flatQueries.add(mq.id);
-      }
-    }
-  }
-
-  // Build header structures from axis trees
-  let rowHeaders = buildHeaderHierarchy(spec.rowAxis, plan, results, 'row');
-  const colHeaders = buildHeaderHierarchy(spec.colAxis, plan, results, 'col');
-
-  // Handle aggregate-only row axis: when rowHeaders is empty but we have aggregates,
-  // create a synthetic row header to represent the single aggregate row.
-  // This ensures the table body has at least one row to display data.
-  if (rowHeaders.length === 0 && spec.aggregates.length > 0) {
-    // Check if the row axis contains only aggregates (no dimensions)
-    const rowDimensions = collectDimensionsFromAxis(spec.rowAxis);
-    if (rowDimensions.length === 0) {
-      // Create synthetic row headers for each aggregate
-      // If there's only one aggregate, create a single row with the aggregate label
-      // If multiple aggregates, each gets its own row
-      if (spec.aggregates.length === 1) {
-        const agg = spec.aggregates[0];
-        rowHeaders = [{
-          type: 'dimension' as const,
-          dimension: '_aggregate',
-          value: agg.label ?? formatAggregateName(agg.measure, agg.aggregation),
-          label: agg.label,
-          span: 1,
-          depth: 0,
-          path: [{ type: 'aggregate' as const, name: agg.name }],
-        }];
-      } else {
-        // Multiple aggregates - each gets its own row
-        rowHeaders = spec.aggregates.map((agg, idx) => ({
-          type: 'dimension' as const,
-          dimension: '_aggregate',
-          value: agg.label ?? formatAggregateName(agg.measure, agg.aggregation),
-          label: agg.label,
-          span: 1,
-          depth: 0,
-          path: [{ type: 'sibling' as const, index: idx }, { type: 'aggregate' as const, name: agg.name }],
-        }));
+    // Build maps of query ID to special handling flags
+    const invertedQueries = new Set<string>();
+    const flatQueries = new Set<string>();
+    if (malloyQueries) {
+      for (const mq of malloyQueries) {
+        if (mq.axesInverted) {
+          invertedQueries.add(mq.id);
+        }
+        if (mq.isFlatQuery) {
+          flatQueries.add(mq.id);
+        }
       }
     }
-  }
 
-  // Build cell lookup (value-based)
-  const cellLookup = buildCellLookup(spec, plan, results, invertedQueries, flatQueries);
+    // Build header structures from axis trees
+    let rowHeaders = buildHeaderHierarchy(spec.rowAxis, plan, results, "row");
+    const colHeaders = buildHeaderHierarchy(spec.colAxis, plan, results, "col");
 
-  // Check for totals
-  const hasRowTotal = axisHasTotal(spec.rowAxis);
-  const hasColTotal = axisHasTotal(spec.colAxis);
+    // Handle aggregate-only row axis: when rowHeaders is empty but we have aggregates,
+    // create a synthetic row header to represent the single aggregate row.
+    // This ensures the table body has at least one row to display data.
+    if (rowHeaders.length === 0 && spec.aggregates.length > 0) {
+      // Check if the row axis contains only aggregates (no dimensions)
+      const rowDimensions = collectDimensionsFromAxis(spec.rowAxis);
+      if (rowDimensions.length === 0) {
+        // Create synthetic row headers for each aggregate
+        // If there's only one aggregate, create a single row with the aggregate label
+        // If multiple aggregates, each gets its own row
+        if (spec.aggregates.length === 1) {
+          const agg = spec.aggregates[0];
+          rowHeaders = [
+            {
+              type: "dimension" as const,
+              dimension: "_aggregate",
+              value:
+                agg.label ?? formatAggregateName(agg.measure, agg.aggregation),
+              label: agg.label,
+              span: 1,
+              depth: 0,
+              path: [{ type: "aggregate" as const, name: agg.name }],
+            },
+          ];
+        } else {
+          // Multiple aggregates - each gets its own row
+          rowHeaders = spec.aggregates.map((agg, idx) => ({
+            type: "dimension" as const,
+            dimension: "_aggregate",
+            value:
+              agg.label ?? formatAggregateName(agg.measure, agg.aggregation),
+            label: agg.label,
+            span: 1,
+            depth: 0,
+            path: [
+              { type: "sibling" as const, index: idx },
+              { type: "aggregate" as const, name: agg.name },
+            ],
+          }));
+        }
+      }
+    }
 
-  // Determine if corner-style row headers should be used
-  // Only valid when rowHeaders:above is set AND row axis doesn't have siblings at root
-  const useCornerRowHeaders = shouldUseCornerRowHeaders(spec);
-  const cornerRowLabels = useCornerRowHeaders ? extractRowDimensionLabels(spec.rowAxis) : undefined;
+    // Build cell lookup (value-based)
+    const cellLookup = buildCellLookup(
+      spec,
+      plan,
+      results,
+      invertedQueries,
+      flatQueries
+    );
 
-  // For left mode (when siblings exist), extract labels to show in corner
-  // Only show labels for dimensions that have custom labels
-  const leftModeRowLabels = !useCornerRowHeaders && rowHeaders.length > 0
-    ? extractLeftModeRowLabels(rowHeaders)
-    : undefined;
+    // Check for totals
+    const hasRowTotal = axisHasTotal(spec.rowAxis);
+    const hasColTotal = axisHasTotal(spec.colAxis);
 
-  return {
-    rowHeaders,
-    colHeaders,
-    getCell: (rowValues, colValues, aggregate) =>
-      cellLookup.get(rowValues, colValues, aggregate),
-    aggregates: spec.aggregates,
-    hasRowTotal,
-    hasColTotal,
-    options: spec.options,
-    useCornerRowHeaders,
-    cornerRowLabels,
-    leftModeRowLabels,
-  };
+    // Determine if corner-style row headers should be used
+    // Only valid when rowHeaders:above is set AND row axis doesn't have siblings at root
+    const useCornerRowHeaders = shouldUseCornerRowHeaders(spec);
+    const cornerRowLabels = useCornerRowHeaders
+      ? extractRowDimensionLabels(spec.rowAxis)
+      : undefined;
+
+    // For left mode (when siblings exist), extract labels to show in corner
+    // Only show labels for dimensions that have custom labels
+    const leftModeRowLabels =
+      !useCornerRowHeaders && rowHeaders.length > 0
+        ? extractLeftModeRowLabels(rowHeaders)
+        : undefined;
+
+    return {
+      rowHeaders,
+      colHeaders,
+      getCell: (rowValues, colValues, aggregate) =>
+        cellLookup.get(rowValues, colValues, aggregate),
+      aggregates: spec.aggregates,
+      hasRowTotal,
+      hasColTotal,
+      options: spec.options,
+      useCornerRowHeaders,
+      cornerRowLabels,
+      leftModeRowLabels,
+    };
   } finally {
     // Clear the registry after building
     currentOrderingProvider = undefined;
@@ -190,7 +206,7 @@ function buildHeaderHierarchy(
   tree: AxisNode | null,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col'
+  axis: "row" | "col"
 ): HeaderNode[] {
   if (!tree) return [];
 
@@ -217,7 +233,7 @@ function buildHeaderNodes(
   node: AxisNode | null,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   depth: number,
   parentValues: Map<string, string | number> = new Map()
@@ -225,16 +241,40 @@ function buildHeaderNodes(
   if (!node) return [];
 
   switch (node.nodeType) {
-    case 'dimension':
-      return buildDimensionHeaders(node, plan, results, axis, currentPath, depth, parentValues);
+    case "dimension":
+      return buildDimensionHeaders(
+        node,
+        plan,
+        results,
+        axis,
+        currentPath,
+        depth,
+        parentValues
+      );
 
-    case 'total':
-      return buildTotalHeaders(node, plan, results, axis, currentPath, depth, parentValues);
+    case "total":
+      return buildTotalHeaders(
+        node,
+        plan,
+        results,
+        axis,
+        currentPath,
+        depth,
+        parentValues
+      );
 
-    case 'siblings':
-      return buildSiblingHeaders(node, plan, results, axis, currentPath, depth, parentValues);
+    case "siblings":
+      return buildSiblingHeaders(
+        node,
+        plan,
+        results,
+        axis,
+        currentPath,
+        depth,
+        parentValues
+      );
 
-    case 'aggregate':
+    case "aggregate":
       // Single aggregates (even with labels) should NOT create header entries.
       // Header entries for aggregates are only appropriate when there are
       // multiple sibling aggregates (e.g., income.sum "Sum" | income.mean "Average").
@@ -244,7 +284,7 @@ function buildHeaderNodes(
       // the label should be used for column headers, not create row entries.
       return [];
 
-    case 'percentageAggregate':
+    case "percentageAggregate":
       // Single percentage aggregates (even with labels) should NOT create header entries.
       // Header entries are only appropriate when there are multiple sibling aggregates.
       // The buildSiblingHeaders function handles that case.
@@ -264,39 +304,57 @@ function buildDimensionHeaders(
   node: DimensionNode,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   depth: number,
   parentValues: Map<string, string | number> = new Map()
 ): HeaderNode[] {
   // Check if this dimension has a custom non-empty label and we're not already in a sibling context
   // If so, we should create a sibling-label wrapper to display the label above dimension values
-  const hasCustomLabel = node.label !== undefined && node.label !== '';
-  const alreadyInSiblingContext = currentPath.some(seg => seg.type === 'sibling');
+  const hasCustomLabel = node.label !== undefined && node.label !== "";
+  const alreadyInSiblingContext = currentPath.some(
+    (seg) => seg.type === "sibling"
+  );
 
   if (hasCustomLabel && !alreadyInSiblingContext) {
     // Create a sibling-label wrapper for this dimension's label
     // Build value headers as children at depth+1
     const valueHeaders = buildDimensionValueHeaders(
-      node, plan, results, axis, currentPath, depth + 1, parentValues
+      node,
+      plan,
+      results,
+      axis,
+      currentPath,
+      depth + 1,
+      parentValues
     );
 
     const span = valueHeaders.reduce((sum, c) => sum + c.span, 0);
 
-    return [{
-      type: 'sibling-label' as const,
-      dimension: node.name,
-      value: node.label,
-      label: node.label,
-      span: span || 1,
-      depth,
-      children: valueHeaders.length > 0 ? valueHeaders : undefined,
-      path: currentPath,
-    }];
+    return [
+      {
+        type: "sibling-label" as const,
+        dimension: node.name,
+        value: node.label,
+        label: node.label,
+        span: span || 1,
+        depth,
+        children: valueHeaders.length > 0 ? valueHeaders : undefined,
+        path: currentPath,
+      },
+    ];
   }
 
   // No custom label or already in sibling context - build value headers directly
-  return buildDimensionValueHeaders(node, plan, results, axis, currentPath, depth, parentValues);
+  return buildDimensionValueHeaders(
+    node,
+    plan,
+    results,
+    axis,
+    currentPath,
+    depth,
+    parentValues
+  );
 }
 
 /**
@@ -306,21 +364,28 @@ function buildDimensionValueHeaders(
   node: DimensionNode,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   depth: number,
   parentValues: Map<string, string | number> = new Map()
 ): HeaderNode[] {
   // Find query results that contain this dimension
   // Pass parentValues to filter values to only those that exist under parent context
-  const dimValues = extractDimensionValues(node.name, plan, results, axis, currentPath, parentValues);
+  const dimValues = extractDimensionValues(
+    node.name,
+    plan,
+    results,
+    axis,
+    currentPath,
+    parentValues
+  );
 
   const headers: HeaderNode[] = [];
 
   for (const value of dimValues) {
     const valuePath: TreePath = [
       ...currentPath,
-      { type: 'dimension', name: node.name },
+      { type: "dimension", name: node.name },
     ];
 
     // Create updated parent values including this dimension's value
@@ -329,16 +394,23 @@ function buildDimensionValueHeaders(
 
     // Recursively build child headers with updated parent context
     const children = node.child
-      ? buildHeaderNodes(node.child, plan, results, axis, valuePath, depth + 1, childParentValues)
+      ? buildHeaderNodes(
+          node.child,
+          plan,
+          results,
+          axis,
+          valuePath,
+          depth + 1,
+          childParentValues
+        )
       : [];
 
     // Calculate span (how many leaf descendants)
-    const span = children.length > 0
-      ? children.reduce((sum, c) => sum + c.span, 0)
-      : 1;
+    const span =
+      children.length > 0 ? children.reduce((sum, c) => sum + c.span, 0) : 1;
 
     headers.push({
-      type: 'dimension',
+      type: "dimension",
       dimension: node.name,
       value: String(value),
       label: node.label,
@@ -359,34 +431,43 @@ function buildTotalHeaders(
   node: TotalNode,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   depth: number,
   parentValues: Map<string, string | number> = new Map()
 ): HeaderNode[] {
   const totalPath: TreePath = [
     ...currentPath,
-    { type: 'total', label: node.label },
+    { type: "total", label: node.label },
   ];
 
   // Recursively build child headers if any
   const children = node.child
-    ? buildHeaderNodes(node.child, plan, results, axis, totalPath, depth + 1, parentValues)
+    ? buildHeaderNodes(
+        node.child,
+        plan,
+        results,
+        axis,
+        totalPath,
+        depth + 1,
+        parentValues
+      )
     : [];
 
-  const span = children.length > 0
-    ? children.reduce((sum, c) => sum + c.span, 0)
-    : 1;
+  const span =
+    children.length > 0 ? children.reduce((sum, c) => sum + c.span, 0) : 1;
 
-  return [{
-    type: 'total',
-    value: node.label ?? 'Total',
-    label: node.label,
-    span,
-    depth,
-    children: children.length > 0 ? children : undefined,
-    path: totalPath,
-  }];
+  return [
+    {
+      type: "total",
+      value: node.label ?? "Total",
+      label: node.label,
+      span,
+      depth,
+      children: children.length > 0 ? children : undefined,
+      path: totalPath,
+    },
+  ];
 }
 
 /**
@@ -402,7 +483,7 @@ function buildSiblingHeaders(
   node: SiblingGroup,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   depth: number,
   parentValues: Map<string, string | number> = new Map()
@@ -411,13 +492,14 @@ function buildSiblingHeaders(
 
   // Check if all children are aggregates (regular or percentage)
   const allAggregates = node.children.every(
-    child => child.nodeType === 'aggregate' || child.nodeType === 'percentageAggregate'
+    (child) =>
+      child.nodeType === "aggregate" || child.nodeType === "percentageAggregate"
   );
 
   // Count dimension children - only use sibling-labels when there are 2+ dimensions
   // A single dimension with totals (dim | ALL) doesn't need sibling-labels
   const dimensionChildren = node.children.filter(
-    child => child.nodeType === 'dimension'
+    (child) => child.nodeType === "dimension"
   );
   const hasMultipleDimensionSiblings = dimensionChildren.length >= 2;
 
@@ -425,43 +507,48 @@ function buildSiblingHeaders(
     const child = node.children[i];
     const siblingPath: TreePath = [
       ...currentPath,
-      { type: 'sibling', index: i },
+      { type: "sibling", index: i },
     ];
 
     // Special handling for aggregate siblings: always create headers
-    if (allAggregates && child.nodeType === 'aggregate') {
+    if (allAggregates && child.nodeType === "aggregate") {
       const aggNode = child as AggregateNode;
       const aggName = `${aggNode.measure}_${aggNode.aggregation}`;
-      const displayValue = aggNode.label ?? formatAggregateName(aggNode.measure, aggNode.aggregation);
+      const displayValue =
+        aggNode.label ??
+        formatAggregateName(aggNode.measure, aggNode.aggregation);
 
       allHeaders.push({
-        type: 'dimension' as const,
-        dimension: '_aggregate',
+        type: "dimension" as const,
+        dimension: "_aggregate",
         value: displayValue,
         label: aggNode.label,
         span: 1,
         depth,
-        path: [...siblingPath, { type: 'aggregate', name: aggName }],
+        path: [...siblingPath, { type: "aggregate", name: aggName }],
       });
-    } else if (allAggregates && child.nodeType === 'percentageAggregate') {
+    } else if (allAggregates && child.nodeType === "percentageAggregate") {
       // Handle percentage aggregate siblings
       const pctNode = child as PercentageAggregateNode;
-      const aggName = `${pctNode.measure ?? ''}_${pctNode.aggregation}_pct`;
-      const displayValue = pctNode.label ?? formatAggregateName(pctNode.measure ?? 'count', pctNode.aggregation);
+      const aggName = `${pctNode.measure ?? ""}_${pctNode.aggregation}_pct`;
+      const displayValue =
+        pctNode.label ??
+        formatAggregateName(pctNode.measure ?? "count", pctNode.aggregation);
 
       allHeaders.push({
-        type: 'dimension' as const,
-        dimension: '_aggregate',
+        type: "dimension" as const,
+        dimension: "_aggregate",
         value: displayValue,
         label: pctNode.label,
         span: 1,
         depth,
-        path: [...siblingPath, { type: 'aggregate', name: aggName }],
+        path: [...siblingPath, { type: "aggregate", name: aggName }],
       });
-    } else if (child.nodeType === 'dimension') {
+    } else if (child.nodeType === "dimension") {
       // Check if we need a sibling-label for this dimension
       const dimNode = child as DimensionNode;
-      const hasCustomLabel = dimNode.label !== undefined && dimNode.label !== '';
+      const hasCustomLabel =
+        dimNode.label !== undefined && dimNode.label !== "";
 
       // Create sibling-label wrapper when:
       // 1. Multiple dimension siblings (always need labels to distinguish them)
@@ -469,7 +556,9 @@ function buildSiblingHeaders(
       // Skip sibling-label when:
       // - suppressLabel is true (label explicitly set to "")
       // - Single dimension without custom label (just show values directly)
-      const needsSiblingLabel = (hasMultipleDimensionSiblings || hasCustomLabel) && !dimNode.suppressLabel;
+      const needsSiblingLabel =
+        (hasMultipleDimensionSiblings || hasCustomLabel) &&
+        !dimNode.suppressLabel;
 
       if (dimNode.suppressLabel || !needsSiblingLabel) {
         // Build dimension value headers directly at current depth (no sibling-label wrapper)
@@ -498,13 +587,14 @@ function buildSiblingHeaders(
         );
 
         // Calculate span from children
-        const span = childHeaders.length > 0
-          ? childHeaders.reduce((sum, c) => sum + c.span, 0)
-          : 1;
+        const span =
+          childHeaders.length > 0
+            ? childHeaders.reduce((sum, c) => sum + c.span, 0)
+            : 1;
 
         // Create the sibling-label header with children
         allHeaders.push({
-          type: 'sibling-label' as const,
+          type: "sibling-label" as const,
           dimension: dimNode.name,
           value: dimensionLabel,
           label: dimNode.label,
@@ -539,14 +629,14 @@ function buildSiblingHeaders(
 function formatAggregateName(measure: string, aggregation: string): string {
   // For count/n without a measure, just return the aggregation name
   // This handles cases like standalone "count" or "n"
-  if (!measure || measure === '__pending__') {
-    return aggregation === 'count' ? 'N' : aggregation;
+  if (!measure || measure === "__pending__") {
+    return aggregation === "count" ? "N" : aggregation;
   }
 
   // For count with a measure (e.g., income.count), just return "N" since
   // count doesn't really bind to a measure in Malloy
-  if (aggregation === 'count') {
-    return 'N';
+  if (aggregation === "count") {
+    return "N";
   }
 
   return `${measure} ${aggregation}`;
@@ -566,7 +656,7 @@ function extractDimensionValues(
   dimension: string,
   plan: QueryPlan,
   results: QueryResults,
-  axis: 'row' | 'col',
+  axis: "row" | "col",
   currentPath: TreePath,
   parentValues: Map<string, string | number> = new Map()
 ): (string | number)[] {
@@ -583,7 +673,7 @@ function extractDimensionValues(
   for (const query of plan.queries) {
     // Collect all groupings to check (including additionalColVariants for merged queries)
     const groupingsToCheck: GroupingInfo[][] = [];
-    if (axis === 'row') {
+    if (axis === "row") {
       groupingsToCheck.push(query.rowGroupings);
     } else {
       groupingsToCheck.push(query.colGroupings);
@@ -595,7 +685,7 @@ function extractDimensionValues(
     }
 
     for (const groupings of groupingsToCheck) {
-      const grouping = groupings.find(g => g.dimension === dimension);
+      const grouping = groupings.find((g) => g.dimension === dimension);
       if (grouping) {
         if (grouping.order?.direction) {
           hasExplicitOrder = true;
@@ -609,7 +699,8 @@ function extractDimensionValues(
 
   // Also preserve data order for TPL-native dimensions with definition order
   // These dimensions are ordered in the Malloy query via order_by on the _order aggregate
-  const hasDefinitionOrder = currentOrderingProvider?.hasDefinitionOrder(dimension) ?? false;
+  const hasDefinitionOrder =
+    currentOrderingProvider?.hasDefinitionOrder(dimension) ?? false;
   const preserveDataOrder = hasExplicitOrder || hasLimit || hasDefinitionOrder;
 
   // Look through all queries that have this dimension in the right axis
@@ -617,25 +708,72 @@ function extractDimensionValues(
     const queryResults = results.get(query.id);
     if (!queryResults) continue;
 
-    if (axis === 'row') {
+    if (axis === "row") {
       // For row dimensions, check rowGroupings
-      if (query.rowGroupings.some(g => g.dimension === dimension)) {
-        extractValuesFromDataOrdered(queryResults, dimension, valuesArray, seenValues, query.rowGroupings, 0, parentValues);
+      if (query.rowGroupings.some((g) => g.dimension === dimension)) {
+        extractValuesFromDataOrdered(
+          queryResults,
+          dimension,
+          valuesArray,
+          seenValues,
+          query.rowGroupings,
+          0,
+          parentValues
+        );
       }
     } else {
       // For column dimensions, check primary colGroupings AND additionalColVariants
       // This handles merged queries where some dimensions are in additionalColVariants
-      const allColGroupings: GroupingInfo[][] = [query.colGroupings];
+      // Each variant may have a nest name suffix, but ONLY when its first dimension
+      // collides with a previous variant's first dimension (to avoid "Cannot redefine" error)
+      const allColGroupingsWithSuffix: Array<{
+        groupings: GroupingInfo[];
+        suffix: string;
+      }> = [];
+      const seenFirstDims = new Map<string, number>();
+
+      // Add primary variant
+      if (query.colGroupings.length > 0) {
+        const firstDim = query.colGroupings[0].dimension;
+        const count = seenFirstDims.get(firstDim) || 0;
+        seenFirstDims.set(firstDim, count + 1);
+        allColGroupingsWithSuffix.push({
+          groupings: query.colGroupings,
+          suffix: count > 0 ? `_${count}` : "",
+        });
+      }
+
+      // Add additional variants
       if (query.additionalColVariants) {
         for (const variant of query.additionalColVariants) {
-          allColGroupings.push(variant.colGroupings);
+          if (variant.colGroupings.length > 0) {
+            const firstDim = variant.colGroupings[0].dimension;
+            const count = seenFirstDims.get(firstDim) || 0;
+            seenFirstDims.set(firstDim, count + 1);
+            allColGroupingsWithSuffix.push({
+              groupings: variant.colGroupings,
+              suffix: count > 0 ? `_${count}` : "",
+            });
+          }
         }
       }
 
-      for (const colGroupings of allColGroupings) {
-        if (colGroupings.some(g => g.dimension === dimension)) {
+      for (const {
+        groupings: colGroupings,
+        suffix,
+      } of allColGroupingsWithSuffix) {
+        if (colGroupings.some((g) => g.dimension === dimension)) {
           // For columns, we need to navigate through row nesting to find pivot structure
-          extractColValuesFromDataOrdered(queryResults, dimension, valuesArray, seenValues, colGroupings, query.rowGroupings, parentValues);
+          extractColValuesFromDataOrdered(
+            queryResults,
+            dimension,
+            valuesArray,
+            seenValues,
+            colGroupings,
+            query.rowGroupings,
+            parentValues,
+            suffix
+          );
         }
       }
     }
@@ -650,7 +788,7 @@ function extractDimensionValues(
   // Default is alphabetical/numerical ascending
   valuesArray.sort((a, b) => {
     // Handle mixed string/number sorting
-    if (typeof a === 'number' && typeof b === 'number') {
+    if (typeof a === "number" && typeof b === "number") {
       return a - b; // Numeric ascending
     }
     return String(a).localeCompare(String(b)); // Alphabetic ascending
@@ -680,7 +818,7 @@ function extractValuesFromData(
   if (!data || data.length === 0) return;
 
   // Find the grouping for this dimension to get its label (if any)
-  const grouping = groupings.find(g => g.dimension === dimension);
+  const grouping = groupings.find((g) => g.dimension === dimension);
   // In Malloy output, labeled dimensions use the label as the column name
   const dataKey = grouping?.label ?? dimension;
 
@@ -689,13 +827,14 @@ function extractValuesFromData(
     let matchesParent = true;
     for (const [parentDim, parentVal] of parentValues) {
       // Find the grouping for parent dimension to get its label
-      const parentGrouping = groupings.find(g => g.dimension === parentDim);
+      const parentGrouping = groupings.find((g) => g.dimension === parentDim);
       const parentDataKey = parentGrouping?.label ?? parentDim;
       const rowVal = row[parentDataKey] ?? row[parentDim];
       // Handle "(null)" matching: if parentVal is "(null)", match against null in data
-      const matches = rowVal === undefined ||
+      const matches =
+        rowVal === undefined ||
         rowVal === parentVal ||
-        (parentVal === '(null)' && rowVal === null);
+        (parentVal === "(null)" && rowVal === null);
       if (!matches) {
         matchesParent = false;
         break;
@@ -713,7 +852,7 @@ function extractValuesFromData(
     }
     // Include null values as "(null)" to ensure limit counts match displayed rows
     if (value === null) {
-      value = '(null)';
+      value = "(null)";
     }
     if (value !== undefined) {
       values.add(value);
@@ -722,8 +861,15 @@ function extractValuesFromData(
     // Check ALL nested structures, not just those in the expected groupings
     // This handles inverted queries where row dims might be inside column nesting
     for (const key of Object.keys(row)) {
-      if (key.startsWith('by_') && Array.isArray(row[key])) {
-        extractValuesFromData(row[key], dimension, values, groupings, depth + 1, parentValues);
+      if (key.startsWith("by_") && Array.isArray(row[key])) {
+        extractValuesFromData(
+          row[key],
+          dimension,
+          values,
+          groupings,
+          depth + 1,
+          parentValues
+        );
       }
     }
   }
@@ -749,12 +895,15 @@ function extractColValuesFromData(
   if (!data || data.length === 0 || colGroupings.length === 0) return;
 
   // Find the grouping for this dimension to get its label (if any)
-  const grouping = colGroupings.find(g => g.dimension === dimension);
+  const grouping = colGroupings.find((g) => g.dimension === dimension);
   const dataKey = grouping?.label ?? dimension;
 
   // First, check if this is a flat query (column dims at top level)
   // If the first row has the dimension directly, it's a flat query
-  if (data.length > 0 && (data[0][dataKey] !== undefined || data[0][dimension] !== undefined)) {
+  if (
+    data.length > 0 &&
+    (data[0][dataKey] !== undefined || data[0][dimension] !== undefined)
+  ) {
     // Flat query - extract values directly from top level
     for (const row of data) {
       let value = row[dataKey];
@@ -763,7 +912,7 @@ function extractColValuesFromData(
       }
       // Include null values as "(null)" to ensure limit counts match displayed rows
       if (value === null) {
-        value = '(null)';
+        value = "(null)";
       }
       if (value !== undefined) {
         values.add(value);
@@ -774,7 +923,15 @@ function extractColValuesFromData(
 
   // Navigate through row structure to find leaf rows, then extract column values
   for (const row of data) {
-    navigateToColPivots(row, dimension, values, colGroupings, rowGroupings, 0, parentValues);
+    navigateToColPivots(
+      row,
+      dimension,
+      values,
+      colGroupings,
+      rowGroupings,
+      0,
+      parentValues
+    );
   }
 }
 
@@ -806,10 +963,22 @@ function navigateToColPivots(
     const hasValueDirectly = row[currentRowDim] !== undefined;
 
     // Or if we need to navigate into its nest first
-    if (!hasValueDirectly && row[currentNestedKey] && Array.isArray(row[currentNestedKey])) {
+    if (
+      !hasValueDirectly &&
+      row[currentNestedKey] &&
+      Array.isArray(row[currentNestedKey])
+    ) {
       // Navigate into the current dimension's nest
       for (const nestedRow of row[currentNestedKey]) {
-        navigateToColPivots(nestedRow, dimension, values, colGroupings, rowGroupings, rowDepth, parentValues);
+        navigateToColPivots(
+          nestedRow,
+          dimension,
+          values,
+          colGroupings,
+          rowGroupings,
+          rowDepth,
+          parentValues
+        );
       }
       return;
     }
@@ -823,14 +992,29 @@ function navigateToColPivots(
 
     if (nestedRows && Array.isArray(nestedRows)) {
       for (const nestedRow of nestedRows) {
-        navigateToColPivots(nestedRow, dimension, values, colGroupings, rowGroupings, rowDepth + 1, parentValues);
+        navigateToColPivots(
+          nestedRow,
+          dimension,
+          values,
+          colGroupings,
+          rowGroupings,
+          rowDepth + 1,
+          parentValues
+        );
       }
       return;
     }
   }
 
   // At leaf of row structure - now extract column values
-  extractColValuesFromRow(row, dimension, values, colGroupings, 0, parentValues);
+  extractColValuesFromRow(
+    row,
+    dimension,
+    values,
+    colGroupings,
+    0,
+    parentValues
+  );
 }
 
 /**
@@ -865,7 +1049,7 @@ function extractColValuesFromRow(
     // Include null values as "(null)" to ensure limit counts match displayed rows
     let displayTopValue = topLevelValue;
     if (displayTopValue === null) {
-      displayTopValue = '(null)';
+      displayTopValue = "(null)";
     }
     // Check parent constraint
     const parentVal = parentValues.get(currentDim.dimension);
@@ -887,7 +1071,14 @@ function extractColValuesFromRow(
       if (nextNested && Array.isArray(nextNested)) {
         // Recurse into next dimension's nesting, but start at depth+1
         for (const nestedRow of nextNested) {
-          extractColValuesFromRow(nestedRow, dimension, values, colGroupings, depth + 1, parentValues);
+          extractColValuesFromRow(
+            nestedRow,
+            dimension,
+            values,
+            colGroupings,
+            depth + 1,
+            parentValues
+          );
         }
       }
     }
@@ -918,7 +1109,7 @@ function extractColValuesFromRow(
       // Include null values as "(null)" to ensure limit counts match displayed rows
       let displayVal = colVal;
       if (displayVal === null) {
-        displayVal = '(null)';
+        displayVal = "(null)";
       }
       if (displayVal !== undefined) {
         values.add(displayVal);
@@ -926,7 +1117,14 @@ function extractColValuesFromRow(
     }
 
     // Continue to deeper column levels
-    extractColValuesFromRow(colRow, dimension, values, colGroupings, depth + 1, parentValues);
+    extractColValuesFromRow(
+      colRow,
+      dimension,
+      values,
+      colGroupings,
+      depth + 1,
+      parentValues
+    );
   }
 }
 
@@ -949,19 +1147,20 @@ function extractValuesFromDataOrdered(
 ): void {
   if (!data || data.length === 0) return;
 
-  const grouping = groupings.find(g => g.dimension === dimension);
+  const grouping = groupings.find((g) => g.dimension === dimension);
   const dataKey = grouping?.label ?? dimension;
 
   for (const row of data) {
     let matchesParent = true;
     for (const [parentDim, parentVal] of parentValues) {
-      const parentGrouping = groupings.find(g => g.dimension === parentDim);
+      const parentGrouping = groupings.find((g) => g.dimension === parentDim);
       const parentDataKey = parentGrouping?.label ?? parentDim;
       const rowVal = row[parentDataKey] ?? row[parentDim];
       // Handle "(null)" matching: if parentVal is "(null)", match against null in data
-      const matches = rowVal === undefined ||
+      const matches =
+        rowVal === undefined ||
         rowVal === parentVal ||
-        (parentVal === '(null)' && rowVal === null);
+        (parentVal === "(null)" && rowVal === null);
       if (!matches) {
         matchesParent = false;
         break;
@@ -976,7 +1175,7 @@ function extractValuesFromDataOrdered(
     }
     // Include null values as "(null)" to ensure limit counts match displayed rows
     if (value === null) {
-      value = '(null)';
+      value = "(null)";
     }
     if (value !== undefined && !seenValues.has(value)) {
       seenValues.add(value);
@@ -984,8 +1183,16 @@ function extractValuesFromDataOrdered(
     }
 
     for (const key of Object.keys(row)) {
-      if (key.startsWith('by_') && Array.isArray(row[key])) {
-        extractValuesFromDataOrdered(row[key], dimension, valuesArray, seenValues, groupings, depth + 1, parentValues);
+      if (key.startsWith("by_") && Array.isArray(row[key])) {
+        extractValuesFromDataOrdered(
+          row[key],
+          dimension,
+          valuesArray,
+          seenValues,
+          groupings,
+          depth + 1,
+          parentValues
+        );
       }
     }
   }
@@ -994,6 +1201,8 @@ function extractValuesFromDataOrdered(
 /**
  * Extract dimension values from column pivot structure, preserving order.
  * Same as extractColValuesFromData but uses array + Set for order preservation.
+ *
+ * @param nestNameSuffix Suffix for nest names (e.g., '_1' for merged query variants)
  */
 function extractColValuesFromDataOrdered(
   data: any[],
@@ -1002,15 +1211,19 @@ function extractColValuesFromDataOrdered(
   seenValues: Set<string | number>,
   colGroupings: GroupingInfo[],
   rowGroupings: GroupingInfo[] = [],
-  parentValues: Map<string, string | number> = new Map()
+  parentValues: Map<string, string | number> = new Map(),
+  nestNameSuffix: string = ""
 ): void {
   if (!data || data.length === 0 || colGroupings.length === 0) return;
 
-  const grouping = colGroupings.find(g => g.dimension === dimension);
+  const grouping = colGroupings.find((g) => g.dimension === dimension);
   const dataKey = grouping?.label ?? dimension;
 
   // First, check if this is a flat query (column dims at top level)
-  if (data.length > 0 && (data[0][dataKey] !== undefined || data[0][dimension] !== undefined)) {
+  if (
+    data.length > 0 &&
+    (data[0][dataKey] !== undefined || data[0][dimension] !== undefined)
+  ) {
     for (const row of data) {
       let value = row[dataKey];
       if (value === undefined) {
@@ -1018,7 +1231,7 @@ function extractColValuesFromDataOrdered(
       }
       // Include null values as "(null)" to ensure limit counts match displayed rows
       if (value === null) {
-        value = '(null)';
+        value = "(null)";
       }
       if (value !== undefined && !seenValues.has(value)) {
         seenValues.add(value);
@@ -1030,12 +1243,24 @@ function extractColValuesFromDataOrdered(
 
   // Navigate through row structure to find leaf rows, then extract column values
   for (const row of data) {
-    navigateToColPivotsOrdered(row, dimension, valuesArray, seenValues, colGroupings, rowGroupings, 0, parentValues);
+    navigateToColPivotsOrdered(
+      row,
+      dimension,
+      valuesArray,
+      seenValues,
+      colGroupings,
+      rowGroupings,
+      0,
+      parentValues,
+      nestNameSuffix
+    );
   }
 }
 
 /**
  * Navigate through row nesting to reach column pivot data, preserving order.
+ *
+ * @param nestNameSuffix Suffix for nest names (e.g., '_1' for merged query variants)
  */
 function navigateToColPivotsOrdered(
   row: any,
@@ -1045,16 +1270,31 @@ function navigateToColPivotsOrdered(
   colGroupings: GroupingInfo[],
   rowGroupings: GroupingInfo[],
   rowDepth: number,
-  parentValues: Map<string, string | number> = new Map()
+  parentValues: Map<string, string | number> = new Map(),
+  nestNameSuffix: string = ""
 ): void {
   if (rowDepth < rowGroupings.length) {
     const currentRowDim = rowGroupings[rowDepth]?.dimension;
     const currentNestedKey = `by_${currentRowDim}`;
     const hasValueDirectly = row[currentRowDim] !== undefined;
 
-    if (!hasValueDirectly && row[currentNestedKey] && Array.isArray(row[currentNestedKey])) {
+    if (
+      !hasValueDirectly &&
+      row[currentNestedKey] &&
+      Array.isArray(row[currentNestedKey])
+    ) {
       for (const nestedRow of row[currentNestedKey]) {
-        navigateToColPivotsOrdered(nestedRow, dimension, valuesArray, seenValues, colGroupings, rowGroupings, rowDepth, parentValues);
+        navigateToColPivotsOrdered(
+          nestedRow,
+          dimension,
+          valuesArray,
+          seenValues,
+          colGroupings,
+          rowGroupings,
+          rowDepth,
+          parentValues,
+          nestNameSuffix
+        );
       }
       return;
     }
@@ -1067,13 +1307,32 @@ function navigateToColPivotsOrdered(
 
     if (nestedRows && Array.isArray(nestedRows)) {
       for (const nestedRow of nestedRows) {
-        navigateToColPivotsOrdered(nestedRow, dimension, valuesArray, seenValues, colGroupings, rowGroupings, rowDepth + 1, parentValues);
+        navigateToColPivotsOrdered(
+          nestedRow,
+          dimension,
+          valuesArray,
+          seenValues,
+          colGroupings,
+          rowGroupings,
+          rowDepth + 1,
+          parentValues,
+          nestNameSuffix
+        );
       }
       return;
     }
   }
 
-  extractColValuesFromRowOrdered(row, dimension, valuesArray, seenValues, colGroupings, 0, parentValues);
+  extractColValuesFromRowOrdered(
+    row,
+    dimension,
+    valuesArray,
+    seenValues,
+    colGroupings,
+    0,
+    parentValues,
+    nestNameSuffix
+  );
 }
 
 /**
@@ -1081,6 +1340,9 @@ function navigateToColPivotsOrdered(
  *
  * Handles the case where the first column dimension is at the top level
  * of the row (not nested), which occurs in inverted queries.
+ *
+ * @param nestNameSuffix Suffix for nest names (e.g., '_1' for merged query variants).
+ *   Only applied to the outermost nest (depth === 0) to match Malloy query structure.
  */
 function extractColValuesFromRowOrdered(
   row: any,
@@ -1089,12 +1351,17 @@ function extractColValuesFromRowOrdered(
   seenValues: Set<string | number>,
   colGroupings: GroupingInfo[],
   depth: number,
-  parentValues: Map<string, string | number> = new Map()
+  parentValues: Map<string, string | number> = new Map(),
+  nestNameSuffix: string = ""
 ): void {
   if (depth >= colGroupings.length) return;
 
   const currentDim = colGroupings[depth];
-  const nestedKey = `by_${currentDim.dimension}`;
+  // Suffix only applies to outermost nest (depth === 0) to avoid duplicate top-level names
+  const nestedKey =
+    depth === 0
+      ? `by_${currentDim.dimension}${nestNameSuffix}`
+      : `by_${currentDim.dimension}`;
   const nested = row[nestedKey];
 
   // Check if the current dimension is at the TOP LEVEL of the row (not nested)
@@ -1107,7 +1374,7 @@ function extractColValuesFromRowOrdered(
     // Include null values as "(null)" to ensure limit counts match displayed rows
     let displayTopValue = topLevelValue;
     if (displayTopValue === null) {
-      displayTopValue = '(null)';
+      displayTopValue = "(null)";
     }
     // Check parent constraint
     const parentVal = parentValues.get(currentDim.dimension);
@@ -1132,7 +1399,16 @@ function extractColValuesFromRowOrdered(
       if (nextNested && Array.isArray(nextNested)) {
         // Recurse into next dimension's nesting, but start at depth+1
         for (const nestedRow of nextNested) {
-          extractColValuesFromRowOrdered(nestedRow, dimension, valuesArray, seenValues, colGroupings, depth + 1, parentValues);
+          extractColValuesFromRowOrdered(
+            nestedRow,
+            dimension,
+            valuesArray,
+            seenValues,
+            colGroupings,
+            depth + 1,
+            parentValues,
+            nestNameSuffix
+          );
         }
       }
     }
@@ -1158,7 +1434,7 @@ function extractColValuesFromRowOrdered(
       // Include null values as "(null)" to ensure limit counts match displayed rows
       let displayColVal = colVal;
       if (displayColVal === null) {
-        displayColVal = '(null)';
+        displayColVal = "(null)";
       }
       if (displayColVal !== undefined && !seenValues.has(displayColVal)) {
         seenValues.add(displayColVal);
@@ -1166,7 +1442,16 @@ function extractColValuesFromRowOrdered(
       }
     }
 
-    extractColValuesFromRowOrdered(colRow, dimension, valuesArray, seenValues, colGroupings, depth + 1, parentValues);
+    extractColValuesFromRowOrdered(
+      colRow,
+      dimension,
+      valuesArray,
+      seenValues,
+      colGroupings,
+      depth + 1,
+      parentValues,
+      nestNameSuffix
+    );
   }
 }
 
@@ -1192,7 +1477,7 @@ function makeCellKey(
   return allEntries
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([k, v]) => `${k}=${v}`)
-    .join('|');
+    .join("|");
 }
 
 interface CellLookup {
@@ -1225,7 +1510,7 @@ function buildCellLookup(
 
   // Index all query results by plan query ID
   // Since we now use a unified QueryPlan system, IDs should match directly
-  const DEBUG = process.env.DEBUG_GRID === 'true';
+  const DEBUG = process.env.DEBUG_GRID === "true";
   for (const query of plan.queries) {
     const queryData = results.get(query.id);
     if (!queryData || queryData.length === 0) {
@@ -1238,16 +1523,25 @@ function buildCellLookup(
     const isInverted = invertedQueries.has(query.id);
     const isFlatQuery = flatQueries.has(query.id);
     if (DEBUG) {
-      console.log(`  Indexing ${query.id}: ${queryData.length} rows, inverted=${isInverted}, flat=${isFlatQuery}`);
+      console.log(
+        `  Indexing ${query.id}: ${queryData.length} rows, inverted=${isInverted}, flat=${isFlatQuery}`
+      );
     }
-    indexQueryResults(queryData, query, cellIndex, spec.aggregates, isInverted, isFlatQuery);
+    indexQueryResults(
+      queryData,
+      query,
+      cellIndex,
+      spec.aggregates,
+      isInverted,
+      isFlatQuery
+    );
   }
 
   // Debug: show all indexed keys
   if (DEBUG) {
     console.log(`  Total cell keys indexed: ${cellIndex.size}`);
     const keys = Array.from(cellIndex.keys()).slice(0, 5);
-    console.log(`  Sample keys: ${keys.join(', ')}`);
+    console.log(`  Sample keys: ${keys.join(", ")}`);
   }
 
   return {
@@ -1260,8 +1554,8 @@ function buildCellLookup(
       const cellData = cellIndex.get(cellKey);
 
       // Determine which aggregate to return
-      const aggName = aggregate ?? spec.aggregates[0]?.name ?? '';
-      const agg = spec.aggregates.find(a => a.name === aggName);
+      const aggName = aggregate ?? spec.aggregates[0]?.name ?? "";
+      const agg = spec.aggregates.find((a) => a.name === aggName);
 
       if (!cellData) {
         if (DEBUG) {
@@ -1269,7 +1563,7 @@ function buildCellLookup(
         }
         return {
           raw: null,
-          formatted: '',
+          formatted: "",
           aggregate: aggName,
           pathDescription: cellKey,
         };
@@ -1283,7 +1577,7 @@ function buildCellLookup(
         aggregate: aggName,
         pathDescription: cellKey,
       };
-    }
+    },
   };
 }
 
@@ -1315,8 +1609,24 @@ function indexQueryResults(
   // - Nested: row dimension (appears as by_X nested array)
   // But we still want to build keys based on LOGICAL row/col groupings.
   // So we tell flattenAndIndex that what it sees as "row" data is actually "col".
-  const malloyRowGroupings = isInverted ? query.colGroupings : query.rowGroupings;
-  const malloyColGroupings = isInverted ? query.rowGroupings : query.colGroupings;
+  const malloyRowGroupings = isInverted
+    ? query.colGroupings
+    : query.rowGroupings;
+  const malloyColGroupings = isInverted
+    ? query.rowGroupings
+    : query.colGroupings;
+
+  // Track first dimensions to calculate nest name suffixes (only add suffix when first dimension collides)
+  const seenFirstDims = new Map<string, number>();
+
+  // Calculate suffix for primary variant
+  let primarySuffix = "";
+  if (malloyColGroupings.length > 0) {
+    const firstDim = malloyColGroupings[0].dimension;
+    const count = seenFirstDims.get(firstDim) || 0;
+    seenFirstDims.set(firstDim, count + 1);
+    primarySuffix = count > 0 ? `_${count}` : "";
+  }
 
   // Flatten nested data and build value-based keys for primary column variant
   flattenAndIndex(
@@ -1330,15 +1640,28 @@ function indexQueryResults(
     0,
     isInverted,
     query.rowGroupings, // logical row groupings
-    query.colGroupings  // logical col groupings
+    query.colGroupings, // logical col groupings
+    primarySuffix
   );
 
   // Handle merged queries with additional column variants
   // Each variant has its own nests (e.g., by_gender vs by_sector_label)
   // that need to be indexed separately
+  // The nests have suffixes like _1, _2 only when first dimension collides
   if (query.additionalColVariants) {
     for (const variant of query.additionalColVariants) {
-      const variantColGroupings = isInverted ? query.rowGroupings : variant.colGroupings;
+      const variantColGroupings = isInverted
+        ? query.rowGroupings
+        : variant.colGroupings;
+
+      // Calculate suffix based on first dimension collision
+      let nestNameSuffix = "";
+      if (variantColGroupings.length > 0) {
+        const firstDim = variantColGroupings[0].dimension;
+        const count = seenFirstDims.get(firstDim) || 0;
+        seenFirstDims.set(firstDim, count + 1);
+        nestNameSuffix = count > 0 ? `_${count}` : "";
+      }
 
       flattenAndIndex(
         data,
@@ -1351,7 +1674,8 @@ function indexQueryResults(
         0,
         isInverted,
         query.rowGroupings,
-        variant.colGroupings
+        variant.colGroupings,
+        nestNameSuffix
       );
     }
   }
@@ -1380,7 +1704,7 @@ function indexFlatQueryResults(
       }
       // Map null to "(null)" to match header extraction
       if (value === null) {
-        value = '(null)';
+        value = "(null)";
       }
       if (value !== undefined) {
         rowValues.set(g.dimension, value);
@@ -1397,7 +1721,7 @@ function indexFlatQueryResults(
       }
       // Map null to "(null)" to match header extraction
       if (value === null) {
-        value = '(null)';
+        value = "(null)";
       }
       if (value !== undefined) {
         colValues.set(g.dimension, value);
@@ -1417,6 +1741,7 @@ function indexFlatQueryResults(
  * @param isInverted When true, malloy outer = logical cols, malloy nested = logical rows
  * @param logicalRowGroupings The actual row groupings for cell key building
  * @param logicalColGroupings The actual col groupings for cell key building
+ * @param nestNameSuffix Suffix for nest names (e.g., '_1' for merged query variants)
  */
 function flattenAndIndex(
   data: any[],
@@ -1429,7 +1754,8 @@ function flattenAndIndex(
   outerDepth: number,
   isInverted: boolean = false,
   logicalRowGroupings?: GroupingInfo[],
-  logicalColGroupings?: GroupingInfo[]
+  logicalColGroupings?: GroupingInfo[],
+  nestNameSuffix: string = ""
 ): void {
   for (const row of data) {
     // Build outer values - collect ALL outer dimension values from the current row
@@ -1448,13 +1774,15 @@ function flattenAndIndex(
       }
       // Map null to "(null)" to match header extraction
       if (value === null) {
-        value = '(null)';
+        value = "(null)";
       }
       if (value !== undefined) {
         currentOuterValues.set(dim, value);
       } else {
-        // Check for nested structure
-        const nestedKey = `by_${dim}`;
+        // Check for nested structure - use suffix for merged query variants
+        // For the first variant (primary), suffix is empty, so by_dim
+        // For additional variants, suffix is _1, _2, etc., so by_dim_1, by_dim_2
+        const nestedKey = `by_${dim}${nestNameSuffix}`;
         if (row[nestedKey] && Array.isArray(row[nestedKey])) {
           // This dimension is nested - recurse
           flattenAndIndex(
@@ -1468,7 +1796,8 @@ function flattenAndIndex(
             i,
             isInverted,
             logicalRowGroupings,
-            logicalColGroupings
+            logicalColGroupings,
+            nestNameSuffix
           );
           break; // Don't continue with this row, we recursed
         }
@@ -1477,9 +1806,10 @@ function flattenAndIndex(
 
     // Handle nested pivots or direct aggregates
     // Only if we collected all outer dimensions (didn't break out for nesting)
-    const hasAllOuterDims = malloyOuterGroupings.every(g =>
-      currentOuterValues.has(g.dimension) ||
-      row[`by_${g.dimension}`]
+    const hasAllOuterDims = malloyOuterGroupings.every(
+      (g) =>
+        currentOuterValues.has(g.dimension) ||
+        row[`by_${g.dimension}${nestNameSuffix}`]
     );
 
     if (!hasAllOuterDims) {
@@ -1495,7 +1825,8 @@ function flattenAndIndex(
         new Map(),
         cellIndex,
         0,
-        isInverted
+        isInverted,
+        nestNameSuffix
       );
     } else {
       // Direct aggregate values
@@ -1505,7 +1836,7 @@ function flattenAndIndex(
         indexAggregateValues(
           row,
           aggregates,
-          baseNestedValues,   // These are actually the row values (empty when no nesting)
+          baseNestedValues, // These are actually the row values (empty when no nesting)
           currentOuterValues, // These are actually the col values
           cellIndex
         );
@@ -1528,6 +1859,8 @@ function flattenAndIndex(
  * @param isInverted When true, swap the interpretation:
  *   - outerValues are actually column values (from outer malloy grouping)
  *   - nestedValues are actually row values (from nested malloy grouping)
+ * @param nestNameSuffix Suffix for nest names (e.g., '_1' for merged query variants).
+ *   Only applied to the outermost nest (nestedDepth === 0) to match Malloy query structure.
  */
 function indexColumnPivots(
   row: any,
@@ -1537,20 +1870,25 @@ function indexColumnPivots(
   baseNestedValues: Map<string, string | number>,
   cellIndex: Map<string, Map<string, number | null>>,
   nestedDepth: number,
-  isInverted: boolean = false
+  isInverted: boolean = false,
+  nestNameSuffix: string = ""
 ): void {
   const currentDim = nestedGroupings[nestedDepth];
   const remainingDims = nestedGroupings.slice(nestedDepth);
 
   // First try the single dimension key
-  let nestedKey = `by_${currentDim.dimension}`;
+  // Suffix only applies to outermost nest (nestedDepth === 0) to avoid duplicate top-level names
+  let nestedKey =
+    nestedDepth === 0
+      ? `by_${currentDim.dimension}${nestNameSuffix}`
+      : `by_${currentDim.dimension}`;
   let nested = row[nestedKey];
 
   // If not found, look for a combined key containing all remaining dimensions
   // This happens in inverted queries where row dims are grouped together
   if (!nested || !Array.isArray(nested)) {
     // Build combined key: by_dim1_dim2_...
-    const combinedKey = 'by_' + remainingDims.map(g => g.dimension).join('_');
+    const combinedKey = "by_" + remainingDims.map((g) => g.dimension).join("_");
     nested = row[combinedKey];
 
     if (nested && Array.isArray(nested)) {
@@ -1567,7 +1905,7 @@ function indexColumnPivots(
           }
           // Map null to "(null)" to match header extraction
           if (value === null) {
-            value = '(null)';
+            value = "(null)";
           }
           if (value !== undefined) {
             currentNestedValues.set(g.dimension, value);
@@ -1580,7 +1918,7 @@ function indexColumnPivots(
             nestedRow,
             aggregates,
             currentNestedValues, // These are actually row values
-            outerValues,         // These are actually col values
+            outerValues, // These are actually col values
             cellIndex
           );
         } else {
@@ -1610,7 +1948,7 @@ function indexColumnPivots(
     }
     // Map null to "(null)" to match header extraction
     if (nestedValue === null) {
-      nestedValue = '(null)';
+      nestedValue = "(null)";
     }
     const currentNestedValues = new Map(baseNestedValues);
 
@@ -1628,7 +1966,8 @@ function indexColumnPivots(
         currentNestedValues,
         cellIndex,
         nestedDepth + 1,
-        isInverted
+        isInverted,
+        nestNameSuffix
       );
     } else {
       // Leaf - index aggregate values
@@ -1639,7 +1978,7 @@ function indexColumnPivots(
           nestedRow,
           aggregates,
           currentNestedValues, // These are actually row values
-          outerValues,         // These are actually col values
+          outerValues, // These are actually col values
           cellIndex
         );
       } else {
@@ -1676,7 +2015,7 @@ function indexAggregateValues(
   for (const agg of aggregates) {
     const value = row[agg.name];
     if (value !== undefined) {
-      cellData.set(agg.name, typeof value === 'number' ? value : null);
+      cellData.set(agg.name, typeof value === "number" ? value : null);
     }
   }
 }
@@ -1696,10 +2035,10 @@ function parseCustomFormatPattern(pattern: string): {
   precision: number | undefined;
 } {
   // Find the # placeholder
-  const hashIndex = pattern.indexOf('#');
+  const hashIndex = pattern.indexOf("#");
   if (hashIndex === -1) {
     // No placeholder - treat entire pattern as suffix
-    return { prefix: '', suffix: pattern, precision: undefined };
+    return { prefix: "", suffix: pattern, precision: undefined };
   }
 
   const prefix = pattern.substring(0, hashIndex);
@@ -1720,34 +2059,34 @@ function parseCustomFormatPattern(pattern: string): {
  * Format a cell value according to its aggregate specification.
  */
 function formatValue(value: number | null, agg?: AggregateInfo): string {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined) return "";
 
   if (agg?.format) {
     switch (agg.format.type) {
-      case 'percent':
+      case "percent":
         // Standard percent format: 0.5 → 50%
         return `${(value * 100).toFixed(1)}%`;
-      case 'rawPercent':
+      case "rawPercent":
         // For percentage aggregates (ACROSS), Malloy already computes 100.0 * value / denominator
         // so the value is already in percentage form (59.44 = 59.44%), don't multiply again
         return `${value.toFixed(1)}%`;
-      case 'integer':
+      case "integer":
         return Math.round(value).toLocaleString();
-      case 'comma':
+      case "comma":
         return value.toLocaleString(undefined, {
           minimumFractionDigits: agg.format.precision,
           maximumFractionDigits: agg.format.precision,
         });
-      case 'decimal':
+      case "decimal":
         return value.toLocaleString(undefined, {
           minimumFractionDigits: agg.format.precision,
           maximumFractionDigits: agg.format.precision,
         });
-      case 'currency':
+      case "currency":
         return `$${value.toLocaleString()}`;
-      case 'custom': {
+      case "custom": {
         // Parse custom format pattern: 'prefix #.precision suffix'
-        const pattern = agg.format.pattern ?? '';
+        const pattern = agg.format.pattern ?? "";
         const { prefix, suffix, precision } = parseCustomFormatPattern(pattern);
         const options: Intl.NumberFormatOptions = {};
         if (precision !== undefined) {
@@ -1791,7 +2130,7 @@ function verifyQueryMatch(query: TaggedQuerySpec, data: any[]): boolean {
 
   // If query expects row dimensions but data has none (total query mismatch)
   if (query.rowGroupings.length > 0) {
-    const hasRowDim = query.rowGroupings.some(g => dataKeys.has(g.dimension));
+    const hasRowDim = query.rowGroupings.some((g) => dataKeys.has(g.dimension));
     if (!hasRowDim) return false;
   }
 
@@ -1799,11 +2138,11 @@ function verifyQueryMatch(query: TaggedQuerySpec, data: any[]): boolean {
   if (query.isRowTotal && query.rowGroupings.length === 0) {
     // Data should NOT have row dimension keys (only nested column keys)
     const hasAnyRowDim = Array.from(dataKeys).some(
-      k => !k.startsWith('by_') && k !== 'births_sum' && k !== 'births_mean'
+      (k) => !k.startsWith("by_") && k !== "births_sum" && k !== "births_mean"
     );
     // Allow if it's just nested keys
     const onlyNestedKeys = Array.from(dataKeys).every(
-      k => k.startsWith('by_') || k === 'births_sum' || k === 'births_mean'
+      (k) => k.startsWith("by_") || k === "births_sum" || k === "births_mean"
     );
     if (!onlyNestedKeys) return false;
   }
@@ -1871,7 +2210,11 @@ function hasFullColPath(
   let leafRow = row;
   for (let i = 1; i < rowGroupings.length; i++) {
     const rowNestedKey = `by_${rowGroupings[i].dimension}`;
-    if (leafRow[rowNestedKey] && Array.isArray(leafRow[rowNestedKey]) && leafRow[rowNestedKey].length > 0) {
+    if (
+      leafRow[rowNestedKey] &&
+      Array.isArray(leafRow[rowNestedKey]) &&
+      leafRow[rowNestedKey].length > 0
+    ) {
       leafRow = leafRow[rowNestedKey][0];
     }
   }
@@ -1880,7 +2223,11 @@ function hasFullColPath(
   let current = leafRow;
   for (const colG of colGroupings) {
     const nestedKey = `by_${colG.dimension}`;
-    if (!current[nestedKey] || !Array.isArray(current[nestedKey]) || current[nestedKey].length === 0) {
+    if (
+      !current[nestedKey] ||
+      !Array.isArray(current[nestedKey]) ||
+      current[nestedKey].length === 0
+    ) {
       return false;
     }
     current = current[nestedKey][0];
@@ -1905,8 +2252,14 @@ function hasNestedKey(
   // Navigate through row nesting
   for (let i = 1; i < rowGroupings.length; i++) {
     const rowNestedKey = `by_${rowGroupings[i].dimension}`;
-    if (row[rowNestedKey] && Array.isArray(row[rowNestedKey]) && row[rowNestedKey].length > 0) {
-      if (hasNestedKey(row[rowNestedKey][0], nestedKey, rowGroupings.slice(i))) {
+    if (
+      row[rowNestedKey] &&
+      Array.isArray(row[rowNestedKey]) &&
+      row[rowNestedKey].length > 0
+    ) {
+      if (
+        hasNestedKey(row[rowNestedKey][0], nestedKey, rowGroupings.slice(i))
+      ) {
         return true;
       }
     }
@@ -1931,18 +2284,19 @@ function indexQueryResultsAuto(
   const keys = Object.keys(sample);
 
   // Find dimension keys (non-aggregate, non-nested)
-  const aggregateNames = new Set(aggregates.map(a => a.name));
-  const dimKeys = keys.filter(k =>
-    !k.startsWith('by_') &&
-    !aggregateNames.has(k) &&
-    typeof sample[k] !== 'object'
+  const aggregateNames = new Set(aggregates.map((a) => a.name));
+  const dimKeys = keys.filter(
+    (k) =>
+      !k.startsWith("by_") &&
+      !aggregateNames.has(k) &&
+      typeof sample[k] !== "object"
   );
 
   // Find nested keys (by_X patterns)
-  const nestedKeys = keys.filter(k => k.startsWith('by_'));
+  const nestedKeys = keys.filter((k) => k.startsWith("by_"));
 
   // Build auto-detected groupings
-  const rowGroupings: GroupingInfo[] = dimKeys.map(k => ({
+  const rowGroupings: GroupingInfo[] = dimKeys.map((k) => ({
     dimension: k,
     label: undefined,
     sort: undefined,
@@ -1950,8 +2304,8 @@ function indexQueryResultsAuto(
   }));
 
   // If there are nested keys, assume they're column groupings
-  const colGroupings: GroupingInfo[] = nestedKeys.map(k => ({
-    dimension: k.replace('by_', ''),
+  const colGroupings: GroupingInfo[] = nestedKeys.map((k) => ({
+    dimension: k.replace("by_", ""),
     label: undefined,
     sort: undefined,
     limit: undefined,
@@ -1993,9 +2347,10 @@ function flattenAndIndexAuto(
     }
 
     // Check for nested row data
-    const nestedRowKeys = Object.keys(row).filter(k =>
-      k.startsWith('by_') &&
-      !colGroupings.some(c => `by_${c.dimension}` === k)
+    const nestedRowKeys = Object.keys(row).filter(
+      (k) =>
+        k.startsWith("by_") &&
+        !colGroupings.some((c) => `by_${c.dimension}` === k)
     );
 
     if (nestedRowKeys.length > 0) {
@@ -2094,14 +2449,14 @@ function axisHasTotal(node: AxisNode | null): boolean {
   if (!node) return false;
 
   switch (node.nodeType) {
-    case 'total':
+    case "total":
       return true;
-    case 'dimension':
+    case "dimension":
       return node.child ? axisHasTotal(node.child) : false;
-    case 'siblings':
-      return node.children.some(c => axisHasTotal(c));
-    case 'aggregate':
-    case 'percentageAggregate':
+    case "siblings":
+      return node.children.some((c) => axisHasTotal(c));
+    case "aggregate":
+    case "percentageAggregate":
       return false;
   }
 }
@@ -2115,22 +2470,28 @@ function axisHasTotal(node: AxisNode | null): boolean {
  */
 export function printGridSpec(grid: GridSpec): string {
   const lines: string[] = [];
-  lines.push('GridSpec:');
+  lines.push("GridSpec:");
 
-  lines.push('\n  Row Headers:');
-  printHeaderNodes(grid.rowHeaders, '    ', lines);
+  lines.push("\n  Row Headers:");
+  printHeaderNodes(grid.rowHeaders, "    ", lines);
 
-  lines.push('\n  Column Headers:');
-  printHeaderNodes(grid.colHeaders, '    ', lines);
+  lines.push("\n  Column Headers:");
+  printHeaderNodes(grid.colHeaders, "    ", lines);
 
-  lines.push(`\n  Aggregates: ${grid.aggregates.map(a => a.name).join(', ')}`);
+  lines.push(
+    `\n  Aggregates: ${grid.aggregates.map((a) => a.name).join(", ")}`
+  );
   lines.push(`  Has Row Total: ${grid.hasRowTotal}`);
   lines.push(`  Has Col Total: ${grid.hasColTotal}`);
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
-function printHeaderNodes(nodes: HeaderNode[], indent: string, lines: string[]): void {
+function printHeaderNodes(
+  nodes: HeaderNode[],
+  indent: string,
+  lines: string[]
+): void {
   for (const node of nodes) {
     let line = `${indent}${node.type}: "${node.value}"`;
     if (node.dimension) line += ` (dim: ${node.dimension})`;
@@ -2138,7 +2499,7 @@ function printHeaderNodes(nodes: HeaderNode[], indent: string, lines: string[]):
     lines.push(line);
 
     if (node.children) {
-      printHeaderNodes(node.children, indent + '  ', lines);
+      printHeaderNodes(node.children, indent + "  ", lines);
     }
   }
 }
@@ -2176,7 +2537,7 @@ function shouldUseCornerRowHeaders(spec: TableSpec): boolean {
   }
 
   // If user explicitly set rowHeaders:left, respect that
-  if (spec.options.rowHeaders === 'left') {
+  if (spec.options.rowHeaders === "left") {
     return false;
   }
 
@@ -2198,10 +2559,10 @@ function shouldUseCornerRowHeaders(spec: TableSpec): boolean {
 function hasSiblingsAnywhere(node: AxisNode | null): boolean {
   if (!node) return false;
 
-  if (node.nodeType === 'siblings') {
+  if (node.nodeType === "siblings") {
     // Count dimension children - only consider "true siblings" if 2+ dimensions
     const dimensionChildCount = node.children.filter(
-      c => c.nodeType === 'dimension'
+      (c) => c.nodeType === "dimension"
     ).length;
 
     if (dimensionChildCount >= 2) {
@@ -2211,10 +2572,10 @@ function hasSiblingsAnywhere(node: AxisNode | null): boolean {
     // Check for nested sibling groups that each contain different dimensions
     // e.g., ((occupation | ALL) | (education | ALL)) has 2 sibling children,
     // each containing a different root dimension
-    const siblingChildrenWithDims = node.children.filter(c => {
-      if (c.nodeType === 'siblings') {
+    const siblingChildrenWithDims = node.children.filter((c) => {
+      if (c.nodeType === "siblings") {
         // This sibling child contains dimensions (possibly with totals)
-        return c.children.some(gc => gc.nodeType === 'dimension');
+        return c.children.some((gc) => gc.nodeType === "dimension");
       }
       return false;
     });
@@ -2233,11 +2594,11 @@ function hasSiblingsAnywhere(node: AxisNode | null): boolean {
     return false;
   }
 
-  if (node.nodeType === 'dimension') {
+  if (node.nodeType === "dimension") {
     return hasSiblingsAnywhere(node.child ?? null);
   }
 
-  if (node.nodeType === 'total') {
+  if (node.nodeType === "total") {
     return hasSiblingsAnywhere(node.child ?? null);
   }
 
@@ -2259,45 +2620,52 @@ function extractRowDimensionLabels(
 
   let current = node;
   while (current) {
-    if (current.nodeType === 'dimension') {
+    if (current.nodeType === "dimension") {
       const dimNode = current as DimensionNode;
       labels.push({
         dimension: dimNode.name,
         label: dimNode.label ?? dimNode.name,
       });
       current = dimNode.child ?? null;
-    } else if (current.nodeType === 'siblings') {
+    } else if (current.nodeType === "siblings") {
       // Check what kind of sibling group this is
       const siblingNode = current as SiblingGroup;
       const dimensionChildren = siblingNode.children.filter(
-        c => c.nodeType === 'dimension'
+        (c) => c.nodeType === "dimension"
       );
       const aggregateChildren = siblingNode.children.filter(
-        c => c.nodeType === 'aggregate' || c.nodeType === 'percentageAggregate'
+        (c) =>
+          c.nodeType === "aggregate" || c.nodeType === "percentageAggregate"
       );
 
       if (dimensionChildren.length === 1) {
         // Single dimension + totals: walk into the dimension
         // This handles patterns like (gender | ALL) where we still want the label
         current = dimensionChildren[0];
-      } else if (dimensionChildren.length === 0 && aggregateChildren.length > 0) {
+      } else if (
+        dimensionChildren.length === 0 &&
+        aggregateChildren.length > 0
+      ) {
         // Aggregate siblings (e.g., income.(sum | mean))
         // Add a synthetic label for the aggregate column
         // The actual aggregate names will be shown in row headers
         labels.push({
-          dimension: '_aggregate',
-          label: '', // Aggregates show their own labels in row headers
+          dimension: "_aggregate",
+          label: "", // Aggregates show their own labels in row headers
         });
         break; // Aggregates are always leaves
       } else {
         // Multiple dimensions - stop collecting (true siblings need left-mode)
         break;
       }
-    } else if (current.nodeType === 'total') {
+    } else if (current.nodeType === "total") {
       // Total node - check if it has a child to continue
       const totalNode = current as TotalNode;
       current = totalNode.child ?? null;
-    } else if (current.nodeType === 'aggregate' || current.nodeType === 'percentageAggregate') {
+    } else if (
+      current.nodeType === "aggregate" ||
+      current.nodeType === "percentageAggregate"
+    ) {
       // Single aggregate - no header column needed
       break;
     } else {
@@ -2343,7 +2711,7 @@ function extractLeftModeRowLabels(
   // If so, those labels are already displayed in body row headers, don't duplicate in corner
   function hasSiblingLabels(nodes: HeaderNode[]): boolean {
     for (const node of nodes) {
-      if (node.type === 'sibling-label') return true;
+      if (node.type === "sibling-label") return true;
       if (node.children && hasSiblingLabels(node.children)) return true;
     }
     return false;
@@ -2353,15 +2721,22 @@ function extractLeftModeRowLabels(
 
   // If sibling-labels exist, they handle showing labels in body - corner should be empty
   if (hasSiblingLabels(rowHeaders)) {
-    const result: Array<{ dimension?: string; label: string; hasCustomLabel: boolean }> = [];
+    const result: Array<{
+      dimension?: string;
+      label: string;
+      hasCustomLabel: boolean;
+    }> = [];
     for (let depth = 0; depth <= maxDepth; depth++) {
-      result.push({ label: '', hasCustomLabel: false });
+      result.push({ label: "", hasCustomLabel: false });
     }
     return result;
   }
 
   // First pass: find the deepest depth where each dimension with a custom label appears
-  const dimensionToDeepestDepth = new Map<string, { depth: number; label: string }>();
+  const dimensionToDeepestDepth = new Map<
+    string,
+    { depth: number; label: string }
+  >();
 
   for (let depth = 0; depth <= maxDepth; depth++) {
     const labelsAtDepth = collectLabelsAtDepth(rowHeaders, depth);
@@ -2370,19 +2745,26 @@ function extractLeftModeRowLabels(
         // Always update to track the deepest occurrence
         const existing = dimensionToDeepestDepth.get(info.dimension);
         if (!existing || depth > existing.depth) {
-          dimensionToDeepestDepth.set(info.dimension, { depth, label: info.label });
+          dimensionToDeepestDepth.set(info.dimension, {
+            depth,
+            label: info.label,
+          });
         }
       }
     }
   }
 
   // Build result array
-  const result: Array<{ dimension?: string; label: string; hasCustomLabel: boolean }> = [];
+  const result: Array<{
+    dimension?: string;
+    label: string;
+    hasCustomLabel: boolean;
+  }> = [];
 
   for (let depth = 0; depth <= maxDepth; depth++) {
     // Check if any dimension should have its label at this depth
     let hasCustom = false;
-    let customLabel = '';
+    let customLabel = "";
     let dimension: string | undefined;
 
     for (const [dim, info] of dimensionToDeepestDepth) {
@@ -2415,7 +2797,11 @@ function collectLabelsAtDepth(
   nodes: HeaderNode[],
   targetDepth: number
 ): Array<{ dimension?: string; label: string; hasCustomLabel: boolean }> {
-  const labels: Array<{ dimension?: string; label: string; hasCustomLabel: boolean }> = [];
+  const labels: Array<{
+    dimension?: string;
+    label: string;
+    hasCustomLabel: boolean;
+  }> = [];
 
   function collect(node: HeaderNode): void {
     if (node.depth === targetDepth) {
@@ -2424,11 +2810,14 @@ function collectLabelsAtDepth(
       // For sibling-label types: DON'T mark as custom - they show labels in body, not corner
       let hasCustomLabel = false;
 
-      if (node.type === 'dimension') {
+      if (node.type === "dimension") {
         // A dimension node has a custom label if node.label is set and non-empty
         // The node.label comes from the AST when user writes: gender "mf"
-        hasCustomLabel = node.label !== undefined && node.label !== '' && node.label !== node.dimension;
-      } else if (node.type === 'sibling-label') {
+        hasCustomLabel =
+          node.label !== undefined &&
+          node.label !== "" &&
+          node.label !== node.dimension;
+      } else if (node.type === "sibling-label") {
         // Sibling-labels display their labels in body row headers, not in corner cells.
         // Don't mark as custom to prevent duplicate label display.
         hasCustomLabel = false;
@@ -2467,23 +2856,23 @@ function collectDimensionsFromAxis(node: AxisNode | null): string[] {
     if (!n) return;
 
     switch (n.nodeType) {
-      case 'dimension':
+      case "dimension":
         if (!seen.has(n.name)) {
           seen.add(n.name);
           dimensions.push(n.name);
         }
         if (n.child) walk(n.child);
         break;
-      case 'total':
+      case "total":
         if (n.child) walk(n.child);
         break;
-      case 'siblings':
+      case "siblings":
         for (const child of n.children) {
           walk(child);
         }
         break;
-      case 'aggregate':
-      case 'percentageAggregate':
+      case "aggregate":
+      case "percentageAggregate":
         // Leaf nodes, no dimensions to collect
         break;
     }
