@@ -39,6 +39,63 @@ import type { DimensionOrderingProvider } from "./dimension-utils.js";
 let currentOrderingProvider: DimensionOrderingProvider | undefined;
 
 // ---
+// DATE NORMALIZATION
+// ---
+
+/**
+ * Normalize a raw data value: converts Date objects to formatted strings
+ * so they display cleanly as headers and work correctly with Set-based
+ * deduplication and value-based cell lookup.
+ *
+ * Dates at midnight UTC (date-only) become "YYYY-MM-DD".
+ * Timestamps with a time component become "YYYY-MM-DD HH:MM:SS".
+ */
+function normalizeDimValue(value: unknown): unknown {
+  if (value instanceof Date) {
+    const iso = value.toISOString();
+    return iso.endsWith("T00:00:00.000Z")
+      ? iso.slice(0, 10)
+      : iso.slice(0, 19).replace("T", " ");
+  }
+  return value;
+}
+
+/**
+ * Recursively normalize all Date values in query result rows.
+ * This ensures Date objects are converted to formatted strings before
+ * any downstream processing (header extraction, cell indexing, etc.).
+ */
+function normalizeResultRow(row: Record<string, any>): Record<string, any> {
+  const normalized: Record<string, any> = {};
+  for (const key of Object.keys(row)) {
+    const val = row[key];
+    if (Array.isArray(val)) {
+      normalized[key] = val.map((item) =>
+        item && typeof item === "object" && !Array.isArray(item) && !(item instanceof Date)
+          ? normalizeResultRow(item)
+          : normalizeDimValue(item)
+      );
+    } else {
+      normalized[key] = normalizeDimValue(val);
+    }
+  }
+  return normalized;
+}
+
+/**
+ * Normalize all Date objects in query results to formatted strings.
+ * Applied once at the entry point so all downstream code sees
+ * consistent string values instead of raw Date objects.
+ */
+function normalizeQueryResults(results: QueryResults): QueryResults {
+  const normalized: QueryResults = new Map();
+  for (const [queryId, rows] of results) {
+    normalized.set(queryId, rows.map(normalizeResultRow));
+  }
+  return normalized;
+}
+
+// ---
 // MAIN BUILDER FUNCTION
 // ---
 
@@ -83,6 +140,11 @@ export function buildGridSpec(
 
   // Set module-level ordering provider for definition-order sorting
   currentOrderingProvider = orderingProvider;
+
+  // Normalize Date objects in results to formatted strings before any processing.
+  // Malloy's toObject() returns JS Date objects for date/timestamp columns, which
+  // cause issues with Set-based dedup, value comparison, and display formatting.
+  results = normalizeQueryResults(results);
 
   try {
     // Build maps of query ID to special handling flags
