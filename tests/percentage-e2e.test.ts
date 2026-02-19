@@ -29,8 +29,8 @@ import {
 // Initialize DuckDB connection once before all tests
 let DEFAULT_SOURCE: string;
 
-beforeAll(() => {
-  createLocalConnection();
+beforeAll(async () => {
+  await createLocalConnection();
   DEFAULT_SOURCE = getDefaultSource();
 });
 

@@ -2,10 +2,15 @@
  * TPL Executor
  *
  * Executes Malloy queries against BigQuery or DuckDB (local mode) and returns results.
+ *
+ * Database backends are loaded lazily via dynamic imports, so consumers only need
+ * to install the backend(s) they actually use:
+ *   npm install @malloydata/db-duckdb    # for DuckDB support
+ *   npm install @malloydata/db-bigquery  # for BigQuery support
  */
 
-import { BigQueryConnection } from '@malloydata/db-bigquery';
-import { DuckDBConnection } from '@malloydata/db-duckdb';
+import type { DuckDBConnection } from '@malloydata/db-duckdb';
+import type { BigQueryConnection } from '@malloydata/db-bigquery';
 import { Runtime, URLReader, Connection } from '@malloydata/malloy';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,6 +18,39 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
+
+// ---
+// LAZY MODULE LOADERS
+// ---
+
+let _DuckDBModule: typeof import('@malloydata/db-duckdb') | null = null;
+let _BigQueryModule: typeof import('@malloydata/db-bigquery') | null = null;
+
+async function loadDuckDB(): Promise<typeof import('@malloydata/db-duckdb')> {
+  if (!_DuckDBModule) {
+    try {
+      _DuckDBModule = await import('@malloydata/db-duckdb');
+    } catch {
+      throw new Error(
+        '@malloydata/db-duckdb is required for DuckDB support. Install it with: npm install @malloydata/db-duckdb'
+      );
+    }
+  }
+  return _DuckDBModule;
+}
+
+async function loadBigQuery(): Promise<typeof import('@malloydata/db-bigquery')> {
+  if (!_BigQueryModule) {
+    try {
+      _BigQueryModule = await import('@malloydata/db-bigquery');
+    } catch {
+      throw new Error(
+        '@malloydata/db-bigquery is required for BigQuery support. Install it with: npm install @malloydata/db-bigquery'
+      );
+    }
+  }
+  return _BigQueryModule;
+}
 
 // ---
 // CONNECTION TYPES
@@ -43,8 +81,20 @@ export type ConnectionOptions = BigQueryConnectionOptions | DuckDBConnectionOpti
 
 let connectionInstance: Connection | null = null;
 let currentConnectionType: ConnectionType | null = null;
+let pendingOptions: ConnectionOptions | null = null;
 
-export function createConnection(options: ConnectionOptions): Connection {
+/**
+ * Store connection options for deferred creation.
+ * The connection will be created lazily on first getConnection() call.
+ */
+export function setPendingConnection(options: ConnectionOptions): void {
+  pendingOptions = options;
+  // Clear any existing connection so the new options take effect
+  connectionInstance = null;
+  currentConnectionType = null;
+}
+
+export async function createConnection(options: ConnectionOptions): Promise<Connection> {
   if (options.type === 'bigquery') {
     return createBigQueryConnection(options);
   } else {
@@ -52,7 +102,8 @@ export function createConnection(options: ConnectionOptions): Connection {
   }
 }
 
-function createBigQueryConnection(options: BigQueryConnectionOptions): BigQueryConnection {
+async function createBigQueryConnection(options: BigQueryConnectionOptions): Promise<Connection> {
+  const { BigQueryConnection } = await loadBigQuery();
   const credentialsPath = options.credentialsPath ?? './config/dev-credentials.json';
 
   // Read credentials to get project ID if not provided
@@ -73,7 +124,8 @@ function createBigQueryConnection(options: BigQueryConnectionOptions): BigQueryC
   return connection;
 }
 
-function createDuckDBConnection(options: DuckDBConnectionOptions): DuckDBConnection {
+async function createDuckDBConnection(options: DuckDBConnectionOptions): Promise<Connection> {
+  const { DuckDBConnection } = await loadDuckDB();
   const connection = new DuckDBConnection(
     'duckdb',
     options.databasePath ?? ':memory:',
@@ -88,10 +140,10 @@ function createDuckDBConnection(options: DuckDBConnectionOptions): DuckDBConnect
 /**
  * Create a default local DuckDB connection with test data
  */
-export function createLocalConnection(): DuckDBConnection {
+export async function createLocalConnection(): Promise<Connection> {
   return createDuckDBConnection({
     type: 'duckdb',
-  }) as DuckDBConnection;
+  });
 }
 
 /**
@@ -99,31 +151,43 @@ export function createLocalConnection(): DuckDBConnection {
  *
  * Connection priority:
  * 1. If connection already exists, return it
- * 2. If TPL_BIGQUERY=true env var is set and credentials exist, use BigQuery
- * 3. Otherwise, use DuckDB (default)
+ * 2. If pending options were set (via setPendingConnection), use those
+ * 3. If TPL_BIGQUERY=true env var is set and credentials exist, use BigQuery
+ * 4. Otherwise, use DuckDB (default)
  */
-export function getConnection(): Connection {
+export async function getConnection(): Promise<Connection> {
   if (!connectionInstance) {
+    // Use pending options if set
+    if (pendingOptions) {
+      const opts = pendingOptions;
+      pendingOptions = null;
+      return await createConnection(opts);
+    }
+
     // BigQuery only if explicitly requested via env var AND credentials exist
     const useBigQuery = process.env.TPL_BIGQUERY === 'true';
     const credentialsPath = './config/dev-credentials.json';
 
     if (useBigQuery && fs.existsSync(credentialsPath)) {
       try {
-        return createConnection({ type: 'bigquery', credentialsPath });
+        return await createConnection({ type: 'bigquery', credentialsPath });
       } catch (e) {
         console.log('BigQuery connection failed, falling back to DuckDB');
-        return createLocalConnection();
+        return await createLocalConnection();
       }
     }
 
     // Default: DuckDB
-    return createLocalConnection();
+    return await createLocalConnection();
   }
   return connectionInstance;
 }
 
 export function getConnectionType(): ConnectionType | null {
+  // Return pending type if connection hasn't been created yet
+  if (!currentConnectionType && pendingOptions) {
+    return pendingOptions.type;
+  }
   return currentConnectionType;
 }
 
@@ -132,11 +196,11 @@ export function getConnectionType(): ConnectionType | null {
 // ---
 
 export async function listDatasets(): Promise<string[]> {
-  const conn = getConnection();
-  if (!(conn instanceof BigQueryConnection)) {
+  const conn = await getConnection();
+  if (currentConnectionType !== 'bigquery') {
     throw new Error('listDatasets only supported for BigQuery');
   }
-  const result = await conn.runSQL(`
+  const result = await (conn as any).runSQL(`
     SELECT schema_name
     FROM \`region-us\`.INFORMATION_SCHEMA.SCHEMATA
     ORDER BY schema_name
@@ -145,11 +209,11 @@ export async function listDatasets(): Promise<string[]> {
 }
 
 export async function listTables(dataset: string): Promise<{ name: string; type: string; rows: number }[]> {
-  const conn = getConnection();
-  if (!(conn instanceof BigQueryConnection)) {
+  const conn = await getConnection();
+  if (currentConnectionType !== 'bigquery') {
     throw new Error('listTables only supported for BigQuery');
   }
-  const result = await conn.runSQL(`
+  const result = await (conn as any).runSQL(`
     SELECT
       table_name,
       table_type,
@@ -167,11 +231,11 @@ export async function listTables(dataset: string): Promise<{ name: string; type:
 }
 
 export async function describeTable(dataset: string, table: string): Promise<{ name: string; type: string }[]> {
-  const conn = getConnection();
-  if (!(conn instanceof BigQueryConnection)) {
+  const conn = await getConnection();
+  if (currentConnectionType !== 'bigquery') {
     throw new Error('describeTable only supported for BigQuery');
   }
-  const result = await conn.runSQL(`
+  const result = await (conn as any).runSQL(`
     SELECT column_name, data_type
     FROM \`${dataset}.INFORMATION_SCHEMA.COLUMNS\`
     WHERE table_name = '${table}'
@@ -184,11 +248,11 @@ export async function describeTable(dataset: string, table: string): Promise<{ n
 }
 
 export async function sampleTable(dataset: string, table: string, limit: number = 10): Promise<any[]> {
-  const conn = getConnection();
-  if (!(conn instanceof BigQueryConnection)) {
+  const conn = await getConnection();
+  if (currentConnectionType !== 'bigquery') {
     throw new Error('sampleTable only supported for BigQuery');
   }
-  const result = await conn.runSQL(`
+  const result = await (conn as any).runSQL(`
     SELECT * FROM \`${dataset}.${table}\` LIMIT ${limit}
   `);
   return result.rows;
@@ -204,7 +268,7 @@ export async function sampleTable(dataset: string, table: string, limit: number 
 export function getDefaultSource(): string {
   const connType = getConnectionType();
 
-  if (connType === 'duckdb') {
+  if (connType === 'duckdb' || connType === null) {
     const csvPath = path.join(PROJECT_ROOT, 'data/test_usa_names.csv');
     return `
 source: names is duckdb.table('${csvPath}') extend {
@@ -251,7 +315,7 @@ export async function executeMalloy(
   malloySource: string,
   options: ExecuteOptions = {}
 ): Promise<any> {
-  const conn = getConnection();
+  const conn = await getConnection();
 
   // Create a minimal URL reader (we're passing source directly)
   const urlReader: URLReader = {
@@ -295,19 +359,14 @@ export async function executeMalloy(
  * Execute raw SQL against the current connection
  */
 export async function executeSQL(sql: string): Promise<any[]> {
-  const conn = getConnection();
-  if (conn instanceof BigQueryConnection) {
-    const result = await conn.runSQL(sql);
-    return result.rows;
-  } else if (conn instanceof DuckDBConnection) {
-    const result = await conn.runSQL(sql);
-    return result.rows;
-  }
-  throw new Error('Unknown connection type');
+  const conn = await getConnection();
+  const result = await (conn as any).runSQL(sql);
+  return result.rows;
 }
 
 // ---
 // EXPORTS
 // ---
 
-export { BigQueryConnection, DuckDBConnection, Runtime };
+export { Runtime };
+export type { DuckDBConnection, BigQueryConnection };

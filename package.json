@@ -1,6 +1,6 @@
 {
   "name": "tplm-lang",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "TPLm - Table Producing Language backed by Malloy.",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,16 +29,28 @@
     "docs:preview": "cd docs-site && npm run docs:preview"
   },
   "devDependencies": {
+    "@malloydata/db-bigquery": "^0.0.326",
+    "@malloydata/db-duckdb": "^0.0.326",
     "@types/node": "^20.0.0",
     "peggy": "^4.0.0",
     "typescript": "^5.0.0",
     "vitest": "^4.0.16"
   },
   "dependencies": {
-    "@malloydata/db-bigquery": "^0.0.326",
-    "@malloydata/db-duckdb": "^0.0.326",
     "@malloydata/malloy": "^0.0.326",
     "chevrotain": "^11.0.3"
+  },
+  "peerDependencies": {
+    "@malloydata/db-bigquery": "^0.0.326",
+    "@malloydata/db-duckdb": "^0.0.326"
+  },
+  "peerDependenciesMeta": {
+    "@malloydata/db-bigquery": {
+      "optional": true
+    },
+    "@malloydata/db-duckdb": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=18.0.0"

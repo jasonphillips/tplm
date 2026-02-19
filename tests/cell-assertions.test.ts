@@ -26,8 +26,8 @@ import {
 let runTPL: (tpl: string) => Promise<TableAssertion>;
 let DEFAULT_SOURCE: string;
 
-beforeAll(() => {
-  createLocalConnection();
+beforeAll(async () => {
+  await createLocalConnection();
   DEFAULT_SOURCE = getDefaultSource();
 
   runTPL = createTPLRunner({

@@ -65,6 +65,7 @@ export {
   getDefaultSource,
   executeMalloy,
   executeSQL,
+  setPendingConnection,
 } from './executor/index.js';
 export type {
   ConnectionType,
@@ -81,8 +82,7 @@ import { buildTableSpec, generateQueryPlan, generateMalloyQueries, buildGridSpec
 import type { TableSpec, QueryPlan, GridSpec, QueryResults, MalloyQuerySpec } from './compiler/index.js';
 import {
   executeMalloy,
-  createConnection,
-  createLocalConnection,
+  setPendingConnection,
 } from './executor/index.js';
 import { renderGridToHTML } from './renderer/index.js';
 import type { DimensionOrderingProvider } from './compiler/dimension-utils.js';
@@ -251,19 +251,21 @@ export class TPL {
 
 /**
  * Create a TPL instance with DuckDB connection (simplest way to start).
+ * Connection is created lazily on first execute() call.
  */
 export function createTPL(options: TPLOptions = {}): TPL {
-  createLocalConnection();
+  setPendingConnection({ type: 'duckdb' });
   return new TPL(options);
 }
 
 /**
  * Create a TPL instance with BigQuery connection.
+ * Connection is created lazily on first execute() call.
  */
 export function createBigQueryTPL(
   options: TPLOptions & { credentialsPath?: string; projectId?: string } = {}
 ): TPL {
-  createConnection({
+  setPendingConnection({
     type: 'bigquery',
     credentialsPath: options.credentialsPath,
     projectId: options.projectId,
@@ -299,7 +301,7 @@ export function fromDuckDBTable(
   tablePath: string,
   options: TPLOptions = {}
 ): EasyTPL {
-  createLocalConnection();
+  setPendingConnection({ type: 'duckdb' });
   const sourceName = 'data';
   const model = `source: ${sourceName} is duckdb.table('${tablePath}')`;
   return new EasyTPL(model, sourceName, {
@@ -346,7 +348,7 @@ export function fromBigQueryTable(
     projectId?: string;
   } & TPLOptions
 ): EasyTPL {
-  createConnection({
+  setPendingConnection({
     type: 'bigquery',
     credentialsPath: options.credentialsPath,
     projectId: options.projectId,

@@ -18,11 +18,18 @@ The playground comes with pre-configured dimensions and measures for the sample 
 
 ## Installation
 
-Install TPLm via npm:
+Install TPLm via npm, along with the database backend you need:
 
 ```bash
-npm install tplm-lang
+# DuckDB (local CSV, Parquet files)
+npm install tplm-lang @malloydata/db-duckdb
+
+# BigQuery
+npm install tplm-lang @malloydata/db-bigquery
 ```
+
+Database backends are optional peer dependencies — install only the one(s) you need.
+If you only need parsing and compilation (no query execution), `npm install tplm-lang` alone is sufficient.
 
 ## Basic Example
 

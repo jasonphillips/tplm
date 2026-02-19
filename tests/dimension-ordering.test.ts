@@ -44,8 +44,8 @@ source: employment is employment_db.table('data/employment.parquet') extend {
 }
 `;
 
-beforeAll(() => {
-  createLocalConnection();
+beforeAll(async () => {
+  await createLocalConnection();
 });
 
 describe('Dimension-Based Ordering', () => {
