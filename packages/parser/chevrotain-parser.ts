@@ -373,6 +373,9 @@ class TPLParser extends CstParser {
   });
 
   // Simplified WHERE expression - captures tokens until ROWS
+  // Must accept all tokens that can appear in Malloy filter expressions,
+  // including @ for date literals (@2025-01-01), minus for negative numbers
+  // and date components, colon for timestamps, and comma for IN lists.
   private whereExpression = this.RULE('whereExpression', () => {
     this.AT_LEAST_ONE(() => {
       this.OR([
@@ -387,6 +390,10 @@ class TPLParser extends CstParser {
         { ALT: () => this.CONSUME(Dot) },
         { ALT: () => this.CONSUME(LParen) },
         { ALT: () => this.CONSUME(RParen) },
+        { ALT: () => this.CONSUME(At) },          // Malloy date literals: @2025-01-01
+        { ALT: () => this.CONSUME(Minus) },        // Negative numbers, date separators
+        { ALT: () => this.CONSUME(Colon) },        // Timestamp separators: 10:30:00
+        { ALT: () => this.CONSUME(CommaPunct) },   // IN lists, multiple conditions
       ]);
     });
   });
@@ -1049,7 +1056,9 @@ class TPLToAstVisitor extends BaseTPLVisitor {
   }
 
   whereExpression(ctx: any): string {
-    // Reconstruct the WHERE expression from tokens
+    // Reconstruct the WHERE expression from tokens, preserving original spacing.
+    // This is important for date literals like @2025-01-01 where tokens (@, 2025, -, 01)
+    // must not have spaces inserted between them.
     const allTokens: IToken[] = [];
     for (const key of Object.keys(ctx)) {
       const tokens = ctx[key];
@@ -1058,9 +1067,17 @@ class TPLToAstVisitor extends BaseTPLVisitor {
       }
     }
 
-    // Sort by position and join
+    // Sort by position in the original input
     allTokens.sort((a, b) => a.startOffset - b.startOffset);
-    return allTokens.map(t => t.image).join(' ');
+
+    // Rebuild using original offsets to preserve spacing
+    if (allTokens.length === 0) return '';
+    let result = allTokens[0].image;
+    for (let i = 1; i < allTokens.length; i++) {
+      const gap = allTokens[i].startOffset - (allTokens[i - 1].startOffset + allTokens[i - 1].image.length);
+      result += (gap > 0 ? ' '.repeat(gap) : '') + allTokens[i].image;
+    }
+    return result;
   }
 
   axis(ctx: any): AxisExpression {

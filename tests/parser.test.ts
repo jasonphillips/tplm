@@ -180,6 +180,26 @@ describe('TPL Parser - FROM and WHERE', () => {
     'TABLE FROM sales WHERE year >= 2023 AND region != \'Unknown\' ROWS region COLS quarter;',
     'WHERE with AND'
   );
+
+  testBothParsers(
+    'TABLE WHERE transaction_date >= @2025-01-01 ROWS state COLS year;',
+    'WHERE with Malloy @ date literal'
+  );
+
+  testBothParsers(
+    'TABLE WHERE created_at >= @2025-01-01 AND created_at < @2025-07-01 ROWS region * revenue.sum;',
+    'WHERE with @ date range'
+  );
+
+  testBothParsers(
+    'TABLE WHERE event_time > @2025-03-15 10:30:00 ROWS category * n;',
+    'WHERE with @ timestamp literal'
+  );
+
+  testBothParsers(
+    'TABLE WHERE amount > -100 ROWS category * amount.sum;',
+    'WHERE with negative number'
+  );
 });
 
 describe('TPL Parser - Formats', () => {
