@@ -1,12 +1,17 @@
 /**
  * Date Normalization Tests
  *
- * Tests that Date objects in query results are properly normalized to
+ * Tests that date-like objects in query results are properly normalized to
  * formatted strings before header extraction and cell indexing.
  *
- * Malloy's toObject() returns JS Date objects for date/timestamp columns.
+ * Two types of date objects appear in Malloy's toObject() output:
+ * 1. JS Date objects (from DuckDB connector)
+ * 2. BigQuery SDK wrapper objects (BigQueryDate, BigQueryTimestamp,
+ *    BigQueryDatetime) — plain objects with a `.value` string property
+ *    and no custom toString(), producing "[object Object]" if unconverted.
+ *
  * Without normalization, these cause:
- * - Verbose column headers (Date.toString() output)
+ * - Verbose/broken column headers
  * - Failed Set-based deduplication (reference equality)
  * - Failed parent value matching (reference equality)
  * - Broken cell lookup (header keys vs cell index keys mismatch)
@@ -336,6 +341,400 @@ describe('Date normalization in grid-spec-builder', () => {
         'revenue_sum',
       );
       expect(cell.raw).toBe(500);
+    });
+  });
+
+  // =========================================================================
+  // BigQuery SDK wrapper object tests
+  // =========================================================================
+  // BigQuery SDK returns BigQueryDate, BigQueryTimestamp, BigQueryDatetime
+  // objects — plain objects with a `.value` string property and no custom
+  // toString(). These appear in toObject() output from the BigQuery connector.
+
+  /** Mock BigQuery SDK date types (mirrors @google-cloud/bigquery classes) */
+  class BigQueryDate {
+    value: string;
+    constructor(value: string) { this.value = value; }
+  }
+  class BigQueryTimestamp {
+    value: string;
+    constructor(value: string) { this.value = value; }
+  }
+  class BigQueryDatetime {
+    value: string;
+    constructor(value: string) { this.value = value; }
+  }
+
+  describe('BigQuery SDK wrapper objects as column dimension values', () => {
+    it('normalizes BigQueryDate objects to date strings in column headers', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 1000 },
+              { survey_month: new BigQueryDate('2025-09-01'), revenue_sum: 1100 },
+            ],
+          },
+          {
+            state: 'TX',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 900 },
+              { survey_month: new BigQueryDate('2025-09-01'), revenue_sum: 950 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      const colValues = colLeaves.map((h) => h.value);
+
+      expect(colValues).toContain('2025-08-01');
+      expect(colValues).toContain('2025-09-01');
+      // Must NOT contain [object Object]
+      for (const val of colValues) {
+        expect(val).not.toContain('[object Object]');
+      }
+    });
+
+    it('normalizes BigQueryTimestamp at midnight to date-only string', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_survey_month: [
+              { survey_month: new BigQueryTimestamp('2025-08-01T00:00:00.000Z'), revenue_sum: 1000 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      expect(colLeaves[0].value).toBe('2025-08-01');
+    });
+
+    it('normalizes BigQueryTimestamp with time to datetime string', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS event_time;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_event_time: [
+              { event_time: new BigQueryTimestamp('2025-08-01T14:30:00.000Z'), revenue_sum: 500 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      expect(colLeaves[0].value).toBe('2025-08-01 14:30:00');
+    });
+
+    it('normalizes BigQueryDatetime objects', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS event_time;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_event_time: [
+              { event_time: new BigQueryDatetime('2025-08-01 14:30:00'), revenue_sum: 500 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      expect(colLeaves[0].value).toBe('2025-08-01 14:30:00');
+    });
+
+    it('deduplicates identical BigQuery date objects across rows', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 1000 },
+            ],
+          },
+          {
+            state: 'TX',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 900 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      const dateHeaders = colLeaves.filter((h) => h.value === '2025-08-01');
+      expect(dateHeaders.length).toBe(1);
+    });
+  });
+
+  describe('BigQuery wrapper objects in row dimensions', () => {
+    it('normalizes BigQueryDate in row headers', () => {
+      const ast = parse('TABLE ROWS survey_month * revenue.sum;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 1000 },
+          { survey_month: new BigQueryDate('2025-09-01'), revenue_sum: 1100 },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const rowValues = grid.rowHeaders.map((h) => h.value);
+      expect(rowValues).toContain('2025-08-01');
+      expect(rowValues).toContain('2025-09-01');
+      for (const val of rowValues) {
+        expect(val).not.toContain('[object Object]');
+      }
+    });
+  });
+
+  describe('Cell lookup with BigQuery wrapper objects', () => {
+    it('cell lookup works with BigQueryDate column dimension', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 1000 },
+              { survey_month: new BigQueryDate('2025-09-01'), revenue_sum: 1100 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const caAug = grid.getCell(
+        new Map([['state', 'CA']]),
+        new Map([['survey_month', '2025-08-01']]),
+        'revenue_sum',
+      );
+      expect(caAug.raw).toBe(1000);
+
+      const caSep = grid.getCell(
+        new Map([['state', 'CA']]),
+        new Map([['survey_month', '2025-09-01']]),
+        'revenue_sum',
+      );
+      expect(caSep.raw).toBe(1100);
+    });
+  });
+
+  describe('HTML rendering with BigQuery wrapper objects', () => {
+    it('renders clean date strings, not [object Object]', () => {
+      const ast = parse('TABLE ROWS state * revenue.sum COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            state: 'CA',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), revenue_sum: 1000 },
+              { survey_month: new BigQueryDate('2025-09-01'), revenue_sum: 1100 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+      const html = renderGridToHTML(grid);
+
+      expect(html).toContain('2025-08-01');
+      expect(html).toContain('2025-09-01');
+      expect(html).not.toContain('[object Object]');
+      // Cell values should appear (not empty due to key mismatch)
+      expect(html).toContain('1,000');
+      expect(html).toContain('1,100');
+    });
+  });
+
+  // =========================================================================
+  // Realistic scenario: Malloy .month truncation dimension
+  // =========================================================================
+  // Models the downstream case:
+  //   dimension: survey_month is submitted_at.month
+  //   TABLE ROWS (position_group | ALL 'Overall') * score.mean
+  //     COLS (survey_month | ALL 'Overall Mean');
+  //
+  // Malloy's .month truncation returns date objects at the 1st of each month.
+  // BigQuery returns BigQueryDate({ value: "2025-08-01" }) for these.
+
+  describe('Malloy .month truncation dimension (downstream scenario)', () => {
+    it('handles month-truncated dates in COLS with ALL totals', () => {
+      const ast = parse(
+        'TABLE ROWS (position_group | ALL) * score.mean COLS (survey_month | ALL);'
+      );
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      // Simulate what BigQuery returns for `survey_month is submitted_at.month`
+      // — BigQueryDate objects at first-of-month
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            position_group: 'Engineering',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), score_mean: 4.2 },
+              { survey_month: new BigQueryDate('2025-09-01'), score_mean: 4.5 },
+            ],
+          },
+          {
+            position_group: 'Sales',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), score_mean: 3.8 },
+              { survey_month: new BigQueryDate('2025-09-01'), score_mean: 4.0 },
+            ],
+          },
+        ]],
+        // ALL total query
+        ['q0_col_all', [
+          {
+            position_group: 'Engineering',
+            score_mean: 4.35,
+          },
+          {
+            position_group: 'Sales',
+            score_mean: 3.9,
+          },
+        ]],
+        // Row ALL total
+        ['q0_row_all', [
+          {
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), score_mean: 4.0 },
+              { survey_month: new BigQueryDate('2025-09-01'), score_mean: 4.25 },
+            ],
+          },
+        ]],
+        // Grand total (both ALL)
+        ['q0_row_all_col_all', [
+          { score_mean: 4.125 },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+      const html = renderGridToHTML(grid);
+
+      // Column headers should show clean dates
+      expect(html).toContain('2025-08-01');
+      expect(html).toContain('2025-09-01');
+      expect(html).not.toContain('[object Object]');
+
+      // Row headers should include groups and ALL
+      expect(html).toContain('Engineering');
+      expect(html).toContain('Sales');
+    });
+
+    it('handles month-truncated BigQueryTimestamp in COLS (timestamp midnight)', () => {
+      // Some BigQuery setups return TIMESTAMP type for .month truncation
+      const ast = parse('TABLE ROWS dept * score.mean COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            dept: 'Eng',
+            by_survey_month: [
+              { survey_month: new BigQueryTimestamp('2025-08-01T00:00:00.000Z'), score_mean: 4.2 },
+              { survey_month: new BigQueryTimestamp('2025-09-01T00:00:00.000Z'), score_mean: 4.5 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      const colLeaves = collectLeafHeaders(grid.colHeaders);
+      const colValues = colLeaves.map((h) => h.value);
+
+      // Midnight timestamps from .month should become date-only
+      expect(colValues).toContain('2025-08-01');
+      expect(colValues).toContain('2025-09-01');
+      expect(colValues).not.toContain('[object Object]');
+    });
+
+    it('cell lookup works with month-truncated BigQuery dates', () => {
+      const ast = parse('TABLE ROWS dept * score.mean COLS survey_month;');
+      const spec = buildTableSpec(ast);
+      const plan = generateQueryPlan(spec);
+
+      const mockResults: QueryResults = new Map([
+        ['q0', [
+          {
+            dept: 'Eng',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), score_mean: 4.2 },
+              { survey_month: new BigQueryDate('2025-09-01'), score_mean: 4.5 },
+            ],
+          },
+          {
+            dept: 'Sales',
+            by_survey_month: [
+              { survey_month: new BigQueryDate('2025-08-01'), score_mean: 3.8 },
+              { survey_month: new BigQueryDate('2025-09-01'), score_mean: 4.0 },
+            ],
+          },
+        ]],
+      ]);
+
+      const grid = buildGridSpec(spec, plan, mockResults);
+
+      // Cell lookup must match normalized date strings
+      const engAug = grid.getCell(
+        new Map([['dept', 'Eng']]),
+        new Map([['survey_month', '2025-08-01']]),
+        'score_mean',
+      );
+      expect(engAug.raw).toBe(4.2);
+
+      const salesSep = grid.getCell(
+        new Map([['dept', 'Sales']]),
+        new Map([['survey_month', '2025-09-01']]),
+        'score_mean',
+      );
+      expect(salesSep.raw).toBe(4.0);
     });
   });
 });

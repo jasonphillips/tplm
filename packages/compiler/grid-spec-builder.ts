@@ -43,9 +43,16 @@ let currentOrderingProvider: DimensionOrderingProvider | undefined;
 // ---
 
 /**
- * Normalize a raw data value: converts Date objects to formatted strings
+ * Normalize a raw data value: converts date-like objects to formatted strings
  * so they display cleanly as headers and work correctly with Set-based
  * deduplication and value-based cell lookup.
+ *
+ * Handles two cases:
+ * 1. JS Date objects (from DuckDB connector)
+ * 2. BigQuery SDK wrapper objects (BigQueryDate, BigQueryTimestamp,
+ *    BigQueryDatetime) which are plain objects with a `.value` string
+ *    property and no custom toString() — producing "[object Object]"
+ *    if left unconverted.
  *
  * Dates at midnight UTC (date-only) become "YYYY-MM-DD".
  * Timestamps with a time component become "YYYY-MM-DD HH:MM:SS".
@@ -57,21 +64,43 @@ function normalizeDimValue(value: unknown): unknown {
       ? iso.slice(0, 10)
       : iso.slice(0, 19).replace("T", " ");
   }
+  // Handle BigQuery SDK date types (BigQueryDate, BigQueryTimestamp, etc.)
+  // These are plain objects with a .value string property.
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "value" in value &&
+    typeof (value as any).value === "string"
+  ) {
+    const str: string = (value as any).value;
+    // ISO timestamp at midnight → date-only
+    if (/^\d{4}-\d{2}-\d{2}T00:00:00(\.0+)?Z?$/.test(str)) {
+      return str.slice(0, 10);
+    }
+    // ISO timestamp with time → "YYYY-MM-DD HH:MM:SS"
+    if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
+      return str.slice(0, 19).replace("T", " ");
+    }
+    // Already formatted (BigQueryDate "2025-08-01", BigQueryDatetime "2025-08-01 00:00:00")
+    return str;
+  }
   return value;
 }
 
-/**
- * Recursively normalize all Date values in query result rows.
- * This ensures Date objects are converted to formatted strings before
- * any downstream processing (header extraction, cell indexing, etc.).
- */
+/** Check if an object is a date-like wrapper (BigQuery SDK types) vs a nested row */
+function isDateLikeWrapper(obj: object): boolean {
+  return "value" in obj && typeof (obj as any).value === "string";
+}
+
 function normalizeResultRow(row: Record<string, any>): Record<string, any> {
   const normalized: Record<string, any> = {};
   for (const key of Object.keys(row)) {
     const val = row[key];
     if (Array.isArray(val)) {
       normalized[key] = val.map((item) =>
-        item && typeof item === "object" && !Array.isArray(item) && !(item instanceof Date)
+        item && typeof item === "object" && !Array.isArray(item)
+          && !(item instanceof Date) && !isDateLikeWrapper(item)
           ? normalizeResultRow(item)
           : normalizeDimValue(item)
       );

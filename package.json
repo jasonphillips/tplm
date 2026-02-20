@@ -1,6 +1,6 @@
 {
   "name": "tplm-lang",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "TPLm - Table Producing Language backed by Malloy.",
   "type": "module",
   "main": "./dist/index.cjs",
