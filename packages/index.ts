@@ -66,8 +66,10 @@ export {
   executeMalloy,
   executeSQL,
   setPendingConnection,
+  setConnection,
 } from './executor/index.js';
 export type {
+  Connection,
   ConnectionType,
   ConnectionOptions,
   BigQueryConnectionOptions,
@@ -83,7 +85,9 @@ import type { TableSpec, QueryPlan, GridSpec, QueryResults, MalloyQuerySpec } fr
 import {
   executeMalloy,
   setPendingConnection,
+  setConnection,
 } from './executor/index.js';
+import type { Connection, ConnectionType } from './executor/index.js';
 import { renderGridToHTML } from './renderer/index.js';
 import type { DimensionOrderingProvider } from './compiler/dimension-utils.js';
 
@@ -359,6 +363,48 @@ export function fromBigQueryTable(
     ...options,
     tablePath: options.table,
     dialect: 'bigquery',
+  });
+}
+
+/**
+ * Query a table using a pre-built Malloy connection.
+ * Use this when you have an existing Connection instance (e.g., a
+ * BigQueryConnection constructed with in-memory credentials).
+ *
+ * @example
+ * ```typescript
+ * import { BigQueryConnection } from '@malloydata/db-bigquery';
+ * import { fromConnection } from 'tplm-lang';
+ *
+ * const connection = new BigQueryConnection('bigquery', undefined, {
+ *   projectId: 'my-project',
+ *   credentials: { client_email, private_key },
+ * });
+ *
+ * const tpl = fromConnection({
+ *   connection,
+ *   table: 'my-project.my_dataset.sales',
+ * });
+ * const { html } = await tpl.query('TABLE ROWS region * revenue.sum COLS quarter;');
+ * ```
+ */
+export function fromConnection(
+  options: {
+    connection: Connection;
+    table: string;
+    dialect?: SqlDialect;
+  } & TPLOptions
+): EasyTPL {
+  const dialect: SqlDialect = options.dialect ?? 'bigquery';
+  const connType: ConnectionType = dialect === 'duckdb' ? 'duckdb' : 'bigquery';
+  setConnection(options.connection, connType);
+  const sourceName = 'data';
+  const prefix = dialect === 'duckdb' ? 'duckdb' : 'bigquery';
+  const model = `source: ${sourceName} is ${prefix}.table('${options.table}')`;
+  return new EasyTPL(model, sourceName, {
+    ...options,
+    tablePath: options.table,
+    dialect,
   });
 }
 

@@ -191,6 +191,17 @@ export function getConnectionType(): ConnectionType | null {
   return currentConnectionType;
 }
 
+/**
+ * Inject a pre-built Malloy connection directly.
+ * Use this when you already have a configured Connection instance
+ * (e.g., a BigQueryConnection with in-memory credentials).
+ */
+export function setConnection(conn: Connection, type: ConnectionType): void {
+  connectionInstance = conn;
+  currentConnectionType = type;
+  pendingOptions = null;
+}
+
 // ---
 // SCHEMA EXPLORATION (BigQuery only)
 // ---
@@ -369,4 +380,4 @@ export async function executeSQL(sql: string): Promise<any[]> {
 // ---
 
 export { Runtime };
-export type { DuckDBConnection, BigQueryConnection };
+export type { Connection, DuckDBConnection, BigQueryConnection };

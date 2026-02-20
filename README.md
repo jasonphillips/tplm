@@ -84,6 +84,16 @@ const tpl = fromBigQueryTable({
   credentialsPath: "./credentials.json",
 });
 
+// Pre-built connection (any Malloy Connection instance)
+import { fromConnection } from "tplm-lang";
+import { BigQueryConnection } from "@malloydata/db-bigquery";
+const conn = new BigQueryConnection("bigquery", {}, { credentials });
+const tpl = fromConnection({
+  connection: conn,
+  table: "project.dataset.sales",
+  dialect: "bigquery",
+});
+
 // Then query the same way
 const { html } = await tpl.query("TABLE ROWS region * revenue.sum;");
 ```
@@ -184,16 +194,27 @@ COLS education * (revenue.sum ACROSS COLS | revenue.mean)
 ### Easy Connectors (Recommended)
 
 ```typescript
-import { fromCSV, fromDuckDBTable, fromBigQueryTable } from "tplm-lang";
+import {
+  fromCSV, fromDuckDBTable, fromBigQueryTable, fromConnection
+} from "tplm-lang";
 
 // CSV or Parquet files
 const tpl = fromCSV("data/sales.csv");
 const tpl = fromDuckDBTable("data/sales.parquet");
 
-// BigQuery
+// BigQuery (file-based credentials)
 const tpl = fromBigQueryTable({
   table: "project.dataset.sales",
   credentialsPath: "./credentials.json",
+});
+
+// Pre-built connection (inject any Malloy Connection instance)
+import { BigQueryConnection } from "@malloydata/db-bigquery";
+const conn = new BigQueryConnection("bigquery", {}, { credentials });
+const tpl = fromConnection({
+  connection: conn,
+  table: "project.dataset.sales",
+  dialect: "bigquery", // or "duckdb"
 });
 
 // Add computed dimensions with .extend()
