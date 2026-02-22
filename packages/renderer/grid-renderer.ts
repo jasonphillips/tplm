@@ -14,6 +14,24 @@ import {
   AggregateInfo,
 } from '../compiler/table-spec.js';
 
+/**
+ * Format an aggregate's display name.
+ * - Standalone count/n → "N"
+ * - field.count (distinct count) → "field N"
+ * - field.sum → "field sum"
+ */
+function formatAggDisplayName(agg: AggregateInfo): string {
+  if (agg.label) return agg.label;
+  if (agg.aggregation === 'count') {
+    if (agg.measure && agg.measure !== '__pending__' && agg.measure !== '') {
+      return `${agg.measure} N`;
+    }
+    return 'N';
+  }
+  if (!agg.measure || agg.measure === '__pending__') return agg.aggregation;
+  return `${agg.measure} ${agg.aggregation}`;
+}
+
 // ---
 // MAIN RENDER FUNCTION
 // ---
@@ -159,7 +177,7 @@ function renderColumnHeaders(
     }
 
     // Single aggregate header
-    lines.push(`<th>${escapeHTML(grid.aggregates[0]?.label ?? grid.aggregates[0]?.name ?? 'Value')}</th>`);
+    lines.push(`<th>${escapeHTML(grid.aggregates[0] ? formatAggDisplayName(grid.aggregates[0]) : 'Value')}</th>`);
     lines.push('</tr>');
     lines.push('</thead>');
     return;
@@ -199,7 +217,7 @@ function renderColumnHeaders(
     } else {
       // Aggregates are not on row axis, render each aggregate as a column header
       for (const agg of grid.aggregates) {
-        lines.push(`<th>${escapeHTML(agg.label ?? agg.name)}</th>`);
+        lines.push(`<th>${escapeHTML(formatAggDisplayName(agg))}</th>`);
       }
     }
 
@@ -628,12 +646,7 @@ function buildHumanPath(
       // Use custom label if provided
       displayAgg = aggInfo.label;
     } else if (aggInfo) {
-      // Build display from measure + aggregation
-      if (aggInfo.aggregation === 'count') {
-        displayAgg = 'count';
-      } else {
-        displayAgg = `${aggInfo.measure}.${aggInfo.aggregation}`;
-      }
+      displayAgg = formatAggDisplayName(aggInfo);
     } else {
       // Fallback: clean up the internal name
       displayAgg = aggregateName
@@ -643,13 +656,7 @@ function buildHumanPath(
   } else if (aggregates.length === 1) {
     // Single aggregate - still show it in tooltip
     const aggInfo = aggregates[0];
-    if (aggInfo.label) {
-      displayAgg = aggInfo.label;
-    } else if (aggInfo.aggregation === 'count') {
-      displayAgg = 'count';
-    } else {
-      displayAgg = `${aggInfo.measure}.${aggInfo.aggregation}`;
-    }
+    displayAgg = formatAggDisplayName(aggInfo);
   }
 
   if (displayAgg) {

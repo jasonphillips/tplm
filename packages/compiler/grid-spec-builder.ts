@@ -718,16 +718,14 @@ function buildSiblingHeaders(
  * Format an aggregate name for display (e.g., "births sum" from "births", "sum")
  */
 function formatAggregateName(measure: string, aggregation: string): string {
-  // For count/n without a measure, just return the aggregation name
-  // This handles cases like standalone "count" or "n"
+  // For count/n without a measure, just return "N"
   if (!measure || measure === "__pending__") {
     return aggregation === "count" ? "N" : aggregation;
   }
 
-  // For count with a measure (e.g., income.count), just return "N" since
-  // count doesn't really bind to a measure in Malloy
+  // For field-bound count (distinct count), show "field N"
   if (aggregation === "count") {
-    return "N";
+    return `${measure} N`;
   }
 
   return `${measure} ${aggregation}`;

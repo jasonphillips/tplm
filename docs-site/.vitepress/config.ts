@@ -55,6 +55,10 @@ export default defineConfig({
             text: "Multiple Aggregates",
             link: "/examples/core/multiple-aggregates",
           },
+          {
+            text: "Distinct Count",
+            link: "/examples/core/distinct-count",
+          },
         ],
       },
       {

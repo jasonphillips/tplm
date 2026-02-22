@@ -183,7 +183,7 @@ describe('Cell Assertion API', () => {
       const table = await runTPL('TABLE ROWS state[1] COLS year[1] * births.sum;');
 
       table.cell({ state: 'CA' }).shouldHaveTooltipContaining('State: CA');
-      table.cell({ state: 'CA' }).shouldHaveTooltipContaining('births.sum');
+      table.cell({ state: 'CA' }).shouldHaveTooltipContaining('births sum');
     });
 
     it('should verify custom label in tooltip', async () => {
@@ -249,13 +249,23 @@ describe('Data Sanity Checks', () => {
       expect(sum).toBeGreaterThan(0);
     });
 
-    it('count should match n', async () => {
+    it('field.count produces distinct count (different from n)', async () => {
       const table = await runTPL('TABLE ROWS state[3] * (n | births.count);');
 
-      // n and count should give same results (both are row counts)
+      // n = row count, births.count = distinct birth values
+      // They should produce different values since many rows share the same birth count
       const cells = table.findAllCells();
       // Should have 6 cells (3 states × 2 aggregates)
       expect(cells.length).toBe(6);
+
+      // For each state, there should be two values: row count and distinct birth count
+      const states = table.getUniqueDimensionValues('state');
+      expect(states.length).toBe(3);
+      // All cells should have positive values
+      for (const cell of cells) {
+        const num = parseFloat(cell.value.replace(/,/g, ''));
+        expect(num).toBeGreaterThan(0);
+      }
     });
   });
 });

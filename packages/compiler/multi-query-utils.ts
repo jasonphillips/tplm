@@ -98,17 +98,22 @@ const AGG_METHOD_MAP: Record<string, string> = {
 };
 
 /**
- * Build a Malloy aggregate expression from measure and aggregation
+ * Build a Malloy aggregate expression from measure and aggregation.
+ *
+ * Count semantics:
+ * - Standalone `count` or `n` (no measure) → `count()` — counts all rows
+ * - Field-bound `user_id.count` (with measure) → `count(user_id)` — counts distinct values
+ *   This matches Malloy's native semantics where count(field) = COUNT(DISTINCT field).
  */
 export function buildAggExpression(measure: string, aggregation: string): string {
   const malloyMethod = AGG_METHOD_MAP[aggregation] ?? aggregation;
 
-  // Handle count - in Malloy, count() doesn't take a measure argument
-  // count() counts all rows, not a specific field
-  // When users write "income.count" or "income.n", they semantically mean "count"
-  // since you can't "count" a measure - you can only count rows
+  // Handle count: standalone = row count, field-bound = distinct count
   if (aggregation === 'count') {
-    return 'count()';
+    if (measure && measure !== '__pending__' && measure !== '') {
+      return `count(${escapeFieldName(measure)})`;  // distinct count of field
+    }
+    return 'count()';  // standalone row count
   }
 
   // Handle other aggregations without a measure (use placeholder)

@@ -139,7 +139,8 @@ Bind a measure to an aggregation method:
 ```sql
 TABLE ROWS occupation * income.sum;
 TABLE ROWS occupation * income.mean;
-TABLE ROWS occupation * income.count;
+TABLE ROWS occupation * n;                  -- row count
+TABLE ROWS education * occupation.count;    -- distinct count of occupations per education
 ```
 
 ### Multiple Aggregations
@@ -158,7 +159,7 @@ Show multiple statistics side by side:
 **Basic:**
 - `sum` - Sum of values
 - `mean` / `avg` - Average
-- `count` / `n` - Row count
+- `count` / `n` - Row count (standalone), or distinct count when bound to a field (`field.count`)
 - `min` / `max` - Minimum / Maximum
 - `stdev` - Standard deviation
 

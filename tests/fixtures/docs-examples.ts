@@ -81,7 +81,7 @@ export const coreExamples: DocsExampleFixture[] = [
       {
         dimensions: { occupation: 'Managerial', education: '&lt;HS' },
         value: 402354,
-        tooltipContains: 'income.sum',
+        tooltipContains: 'income sum',
       },
       {
         dimensions: { occupation: 'Professional', education: 'College' },

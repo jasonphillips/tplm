@@ -183,10 +183,28 @@ function buildNestedPivot(
 function buildAggregates(aggregates: AggregateInfo[], indent: number = 2): string {
   const pad = ' '.repeat(indent);
   const aggs = aggregates.map(a => {
-    return `${a.name} is ${a.measure}.${a.aggregation}()`;
+    return `${a.name} is ${buildAggExpr(a.measure, a.aggregation)}`;
   });
 
   return `${pad}aggregate: ${aggs.join(', ')}`;
+}
+
+/** Build a Malloy aggregate expression (mirrors multi-query-utils buildAggExpression) */
+function buildAggExpr(measure: string, aggregation: string): string {
+  if (aggregation === 'count') {
+    if (measure && measure !== '__pending__' && measure !== '') {
+      return `count(${escapeForMalloy(measure)})`;
+    }
+    return 'count()';
+  }
+  if (!measure || measure === '__pending__') return 'count()';
+  const methodMap: Record<string, string> = { mean: 'avg', stdev: 'stddev', pct: 'sum', pctn: 'count', pctsum: 'sum' };
+  return `${measure}.${methodMap[aggregation] ?? aggregation}()`;
+}
+
+const MALLOY_RESERVED = new Set(['all','and','as','asc','avg','by','case','cast','count','day','desc','dimension','else','end','exclude','extend','false','from','group','having','hour','import','is','join','limit','max','measure','min','minute','month','nest','not','now','null','number','on','or','order','pick','quarter','run','second','source','sum','then','true','week','when','where','year']);
+function escapeForMalloy(name: string): string {
+  return MALLOY_RESERVED.has(name.toLowerCase()) ? `\`${name}\`` : name;
 }
 
 /**
@@ -197,7 +215,7 @@ function buildTotalAggregate(
   label?: string
 ): string {
   const aggs = aggregates.map(a => {
-    return `${a.name} is ${a.measure}.${a.aggregation}()`;
+    return `${a.name} is ${buildAggExpr(a.measure, a.aggregation)}`;
   });
 
   const nestName = label ? `"${label}"` : '"total"';

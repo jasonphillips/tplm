@@ -11,7 +11,7 @@ Labels on aggregates clarify what each column shows.
   :editor-rows="4"
   label="Try It"
   :variations="[
-    { label: 'Multiple Aggregate Labels', query: 'TABLE\n  ROWS occupation\n  COLS income.sum \'Sum\' | income.mean \'Average\' | income.count \'Count\'\n;' },
+    { label: 'Multiple Aggregate Labels', query: 'TABLE\n  ROWS occupation\n  COLS income.sum \'Sum\' | income.mean \'Average\' | n \'Count\'\n;' },
     { label: 'Labels with Totals', query: 'TABLE\n  ROWS (occupation | ALL \'All Jobs\')\n  COLS (education | ALL) * income.sum \'Income Total\'\n;' }
   ]"
 />
