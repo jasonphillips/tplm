@@ -146,6 +146,43 @@ const tpl = fromBigQueryTable({
 const { html } = await tpl.query('TABLE ROWS region * revenue.sum COLS quarter;')
 ```
 
+### Query a SQL Result (JOINs, CTEs)
+
+When your data comes from a SQL query rather than a single table — for example, a JOIN — use `fromDuckDBSQL` or `fromConnectionSQL`:
+
+```typescript
+import { fromDuckDBSQL } from 'tplm-lang'
+
+// Join two CSV files and query the result
+const tpl = fromDuckDBSQL(`
+  SELECT a.*, b.region
+  FROM 'sales.csv' a
+  JOIN 'regions.csv' b ON a.region_id = b.id
+`)
+
+const { html } = await tpl.query('TABLE ROWS region * revenue.sum COLS quarter;')
+```
+
+For BigQuery with a pre-built connection:
+
+```typescript
+import { fromConnectionSQL } from 'tplm-lang'
+
+const tpl = fromConnectionSQL({
+  connection: myBigQueryConnection,
+  sql: `
+    SELECT a.revenue, a.product, b.region
+    FROM \`project.dataset.sales\` a
+    JOIN \`project.dataset.regions\` b ON a.region_id = b.id
+  `,
+  dialect: 'bigquery',
+})
+
+const { html } = await tpl.query('TABLE ROWS region * revenue.sum COLS product;')
+```
+
+SQL sources support all TPL features: percentiles, `.extend()`, filtering, totals, and formatting.
+
 ## Adding Computed Dimensions
 
 TPL provides a `DIMENSION` syntax for defining computed dimensions that transform raw column values:
@@ -277,14 +314,13 @@ const { html } = await tpl.execute(
 ```
 
 ::: warning Percentile Limitation
-When using `createTPL()` with a custom Malloy model, percentile aggregations (p25, p50, p75, median, etc.) are **not supported**. Use the `fromCSV()`, `fromDuckDBTable()`, or `fromBigQueryTable()` approach instead if you need percentiles.
+When using `createTPL()` with a custom Malloy model, percentile aggregations (p25, p50, p75, median, etc.) are **not supported**. Use the Easy Connectors (`fromCSV`, `fromDuckDBTable`, `fromBigQueryTable`, `fromConnectionSQL`, `fromDuckDBSQL`) instead if you need percentiles.
 :::
 
 ### When to Use Full Malloy Model
 
-- Joining multiple tables
 - Complex calculated measures that TPL can't express
 - Migrating existing Malloy models to TPL
 - Advanced Malloy patterns (views, refinements, etc.)
 
-For most use cases, the `fromCSV()` / `fromDuckDBTable()` / `fromBigQueryTable()` approach with `.extend()` is recommended.
+For most use cases, including joins, the Easy Connectors with `.extend()` are recommended. Use `fromConnectionSQL()` or `fromDuckDBSQL()` for SQL-based sources like JOINs.

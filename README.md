@@ -94,6 +94,25 @@ const tpl = fromConnection({
   dialect: "bigquery",
 });
 
+// SQL source (JOINs, CTEs, subqueries)
+import { fromConnectionSQL } from "tplm-lang";
+const tpl = fromConnectionSQL({
+  connection: conn,
+  sql: `
+    SELECT a.revenue, a.product, b.region
+    FROM \`p.d.sales\` a
+    JOIN \`p.d.regions\` b ON a.region_id = b.id
+  `,
+  dialect: "bigquery",
+});
+
+// DuckDB SQL source (no connection needed)
+import { fromDuckDBSQL } from "tplm-lang";
+const tpl = fromDuckDBSQL(`
+  SELECT a.*, b.region
+  FROM 'sales.csv' a JOIN 'regions.csv' b ON a.region_id = b.id
+`);
+
 // Then query the same way
 const { html } = await tpl.query("TABLE ROWS region * revenue.sum;");
 ```
@@ -195,7 +214,8 @@ COLS education * (revenue.sum ACROSS COLS | revenue.mean)
 
 ```typescript
 import {
-  fromCSV, fromDuckDBTable, fromBigQueryTable, fromConnection
+  fromCSV, fromDuckDBTable, fromBigQueryTable, fromConnection,
+  fromConnectionSQL, fromDuckDBSQL,
 } from "tplm-lang";
 
 // CSV or Parquet files
@@ -216,6 +236,16 @@ const tpl = fromConnection({
   table: "project.dataset.sales",
   dialect: "bigquery", // or "duckdb"
 });
+
+// SQL source — query JOINs, CTEs, or any SQL result
+const tpl = fromConnectionSQL({
+  connection: conn,
+  sql: `SELECT a.*, b.region FROM \`p.d.sales\` a JOIN \`p.d.regions\` b ON a.rid = b.id`,
+  dialect: "bigquery",
+});
+
+// DuckDB SQL source (no connection needed)
+const tpl = fromDuckDBSQL(`SELECT a.*, b.region FROM 'sales.csv' a JOIN 'regions.csv' b ON a.rid = b.id`);
 
 // Add computed dimensions with .extend()
 const tplWithDims = tpl.extend(`
@@ -345,7 +375,7 @@ The renderer produces HTML tables with:
 
 ## Advanced: Using Full Malloy Models
 
-For complex scenarios requiring joins, pre-defined measures, or multiple sources, you can use full Malloy models. This is an advanced approach for users already familiar with Malloy.
+For complex scenarios requiring pre-defined measures, multiple sources, or advanced Malloy patterns, you can use full Malloy models. This is an advanced approach for users already familiar with Malloy. (For simple joins, consider `fromConnectionSQL` or `fromDuckDBSQL` instead.)
 
 ```typescript
 import { createTPL } from "tplm-lang";
@@ -365,12 +395,12 @@ const { html } = await tpl.execute(
 );
 ```
 
-> **Note:** When using full Malloy models, **percentile aggregations are not supported** (`p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `median`). This is because percentiles require pre-computing values via SQL window functions against the raw table, and TPL cannot introspect complex Malloy models to determine the underlying table structure. Use the Easy Connectors (fromCSV, fromDuckDBTable, fromBigQueryTable) for percentile support.
+> **Note:** When using full Malloy models, **percentile aggregations are not supported** (`p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `median`). This is because percentiles require pre-computing values via SQL window functions against the raw table, and TPL cannot introspect complex Malloy models to determine the underlying table structure. Use the Easy Connectors (fromCSV, fromDuckDBTable, fromBigQueryTable, fromConnectionSQL, fromDuckDBSQL) for percentile support.
 
 **What belongs in your Malloy model:**
 
-- Joins between tables
 - Complex calculated measures TPL cannot express
+- Advanced Malloy patterns (views, refinements, etc.)
 
 **What TPL computes at query time:**
 

@@ -286,9 +286,12 @@ import {
   analyzeAndGeneratePercentileConfig,
   postProcessMalloyForPercentiles,
   generateMultiLevelPercentileSQL,
+  sqlSource,
+  tableSource,
   type SqlDialect,
   type PercentileConfig,
   type PartitionLevel,
+  type SourceRef,
 } from './compiler/percentile-utils.js';
 
 /**
@@ -409,11 +412,105 @@ export function fromConnection(
 }
 
 /**
+ * Query any SQL query result using a pre-built Malloy connection.
+ * Use this when your data comes from a SQL query (e.g., a JOIN) rather than a single table.
+ *
+ * The SQL is used as Malloy's `bigquery.sql("""...""")` or `duckdb.sql("""...""")` source,
+ * which supports schema introspection and querying without creating views or temp tables.
+ *
+ * @example
+ * ```typescript
+ * import { BigQueryConnection } from '@malloydata/db-bigquery';
+ * import { fromConnectionSQL } from 'tplm-lang';
+ *
+ * const connection = new BigQueryConnection('bigquery', undefined, {
+ *   projectId: 'my-project',
+ *   credentials: { client_email, private_key },
+ * });
+ *
+ * const tpl = fromConnectionSQL({
+ *   connection,
+ *   sql: `
+ *     SELECT a.revenue, a.product_category, b.region
+ *     FROM \`p.d.sales\` a
+ *     JOIN \`p.d.customers\` b ON a.customer_id = b.customer_id
+ *   `,
+ *   dialect: 'bigquery',
+ * });
+ * const { html } = await tpl.query('TABLE ROWS region * revenue.sum COLS product_category;');
+ * ```
+ */
+export function fromConnectionSQL(
+  options: {
+    connection: Connection;
+    sql: string;
+    dialect?: SqlDialect;
+  } & TPLOptions
+): EasyTPL {
+  validateSQL(options.sql);
+  const dialect: SqlDialect = options.dialect ?? 'bigquery';
+  const connType: ConnectionType = dialect === 'duckdb' ? 'duckdb' : 'bigquery';
+  setConnection(options.connection, connType);
+  const sourceName = 'data';
+  const prefix = dialect === 'duckdb' ? 'duckdb' : 'bigquery';
+  const model = `source: ${sourceName} is ${prefix}.sql("""${options.sql}""")`;
+  return new EasyTPL(model, sourceName, {
+    ...options,
+    sourceSQL: options.sql,
+    dialect,
+  });
+}
+
+/**
+ * Query a DuckDB SQL result directly.
+ * Use this when your data comes from a SQL query rather than a file.
+ *
+ * @example
+ * ```typescript
+ * import { fromDuckDBSQL } from 'tplm-lang';
+ *
+ * const tpl = fromDuckDBSQL(`
+ *   SELECT a.*, b.region
+ *   FROM 'sales.csv' a
+ *   JOIN 'regions.csv' b ON a.region_id = b.id
+ * `);
+ * const { html } = await tpl.query('TABLE ROWS region * revenue.sum;');
+ * ```
+ */
+export function fromDuckDBSQL(
+  sql: string,
+  options: TPLOptions = {}
+): EasyTPL {
+  validateSQL(sql);
+  setPendingConnection({ type: 'duckdb' });
+  const sourceName = 'data';
+  const model = `source: ${sourceName} is duckdb.sql("""${sql}""")`;
+  return new EasyTPL(model, sourceName, {
+    ...options,
+    sourceSQL: sql,
+    dialect: 'duckdb',
+  });
+}
+
+/**
+ * Validate that SQL doesn't contain triple-quotes which would break Malloy's SQL embedding.
+ */
+function validateSQL(sql: string): void {
+  if (sql.includes('"""')) {
+    throw new Error(
+      'SQL source cannot contain triple-quotes (""") as they conflict with Malloy\'s SQL embedding syntax.'
+    );
+  }
+}
+
+/**
  * Extended options for EasyTPL that include percentile support metadata.
  */
 interface EasyTPLOptions extends TPLOptions {
   /** Path to the source table (for percentile support) */
   tablePath?: string;
+  /** Raw SQL source (alternative to tablePath, for SQL-backed sources) */
+  sourceSQL?: string;
   /** SQL dialect (for percentile support) */
   dialect?: SqlDialect;
   /** Mapping from computed dimension names to dimension info (for percentile partitioning) */
@@ -431,7 +528,8 @@ import {
 
 /**
  * Simplified TPL API for direct table queries.
- * Created by fromDuckDBTable, fromCSV, or fromBigQueryTable.
+ * Created by fromDuckDBTable, fromCSV, fromBigQueryTable, fromConnection,
+ * fromConnectionSQL, or fromDuckDBSQL.
  *
  * Supports percentile aggregations (p25, p50/median, p75, p90, p95, p99)
  * by automatically generating derived SQL sources with window functions.
@@ -441,6 +539,7 @@ export class EasyTPL {
   private model: string;
   private sourceName: string;
   private tablePath?: string;
+  private sourceSQL?: string;
   private dialect?: SqlDialect;
   private dimensionMap: Map<string, DimensionInfo>;
   private orderingProvider?: DimensionOrderingProvider;
@@ -450,6 +549,7 @@ export class EasyTPL {
     this.model = model;
     this.sourceName = sourceName;
     this.tablePath = options.tablePath;
+    this.sourceSQL = options.sourceSQL;
     this.dialect = options.dialect;
     this.dimensionMap = options.dimensionMap || new Map();
     this.orderingProvider = options.orderingProvider;
@@ -471,13 +571,16 @@ export class EasyTPL {
    * ```
    */
   async query(tplSource: string): Promise<ExecuteResult> {
-    // Check if we can handle percentiles (need tablePath and dialect)
-    if (this.tablePath && this.dialect) {
+    // Resolve the source reference for percentile support
+    const sourceRef = this.getSourceRef();
+
+    // Check if we can handle percentiles (need a source and dialect)
+    if (sourceRef && this.dialect) {
       // Parse the TPL to detect percentiles
       const stmt = parse(tplSource);
       const percentileConfig = analyzeAndGeneratePercentileConfig(
         stmt,
-        this.tablePath,
+        sourceRef,
         this.sourceName,
         this.dialect,
         tplSource
@@ -506,7 +609,7 @@ export class EasyTPL {
         }
 
         const derivedSQL = generateMultiLevelPercentileSQL(
-          this.tablePath,
+          sourceRef,
           percentileConfig.percentiles,
           mappedPartitionLevels,
           this.dialect,
@@ -614,16 +717,8 @@ export class EasyTPL {
    * ```
    */
   extend(malloyExtend: string): EasyTPL {
-    // Remove the closing source and add extend block
-    const extendedModel = this.model.replace(
-      /^(source: \w+ is [^)]+\))$/,
-      `$1 extend {\n${malloyExtend}\n}`
-    );
-
-    // If no match (already has extend), append to existing extend block
-    const finalModel = extendedModel === this.model
-      ? this.model.replace(/}$/, `\n${malloyExtend}\n}`)
-      : extendedModel;
+    // Add extend block to the model, handling both table and SQL source patterns
+    const finalModel = this.addExtendBlock(malloyExtend);
 
     // Parse the extend text to extract dimension→column mappings
     const newMappings = parseDimensionMappings(malloyExtend);
@@ -657,6 +752,7 @@ export class EasyTPL {
 
     return new EasyTPL(modelWithAutoDims, this.sourceName, {
       tablePath: this.tablePath,
+      sourceSQL: this.sourceSQL,
       dialect: this.dialect,
       dimensionMap: mergedMap,
       orderingProvider,
@@ -683,6 +779,11 @@ export class EasyTPL {
     return new Map(this.dimensionMap);
   }
 
+  /** Get the source SQL (if this is a SQL-backed source) */
+  getSourceSQL(): string | undefined {
+    return this.sourceSQL;
+  }
+
   /** Get dimension→raw column mapping (for backward compatibility) */
   getDimensionToColumnMap(): Map<string, string> {
     const result = new Map<string, string>();
@@ -690,5 +791,58 @@ export class EasyTPL {
       result.set(dim, info.rawColumn);
     }
     return result;
+  }
+
+  /**
+   * Build a SourceRef for percentile SQL generation.
+   * Prefers sourceSQL (wrapped as subquery) over tablePath.
+   */
+  private getSourceRef(): SourceRef | undefined {
+    if (this.sourceSQL) {
+      return sqlSource(this.sourceSQL);
+    }
+    if (this.tablePath) {
+      return tableSource(this.tablePath);
+    }
+    return undefined;
+  }
+
+  /**
+   * Add an extend block to the model string.
+   * Handles both table-based models (single closing paren) and
+   * SQL-based models (triple-quoted SQL with embedded parentheses).
+   */
+  private addExtendBlock(malloyExtend: string): string {
+    // If model already has an extend block, append to it
+    if (this.model.includes(' extend {')) {
+      return this.model.replace(/}\s*$/, `\n${malloyExtend}\n}`);
+    }
+
+    // For SQL sources: match triple-quoted pattern which may contain parens
+    // e.g. source: data is bigquery.sql("""SELECT ... FROM (subq) ...""")
+    const sqlSourceMatch = this.model.match(
+      /^(source:\s+\w+\s+is\s+\w+\.sql\("""[\s\S]*?"""\))$/
+    );
+    if (sqlSourceMatch) {
+      return `${sqlSourceMatch[1]} extend {\n${malloyExtend}\n}`;
+    }
+
+    // For table sources: match up to closing paren
+    // e.g. source: data is duckdb.table('file.csv')
+    const tableSourceMatch = this.model.match(
+      /^(source:\s+\w+\s+is\s+\w+\.table\('[^']*'\))$/
+    );
+    if (tableSourceMatch) {
+      return `${tableSourceMatch[1]} extend {\n${malloyExtend}\n}`;
+    }
+
+    // Fallback: try the original generic pattern (for any model ending with ")")
+    const genericMatch = this.model.match(/^([\s\S]*\))$/);
+    if (genericMatch) {
+      return `${genericMatch[1]} extend {\n${malloyExtend}\n}`;
+    }
+
+    // If nothing matched, just append
+    return `${this.model} extend {\n${malloyExtend}\n}`;
   }
 }

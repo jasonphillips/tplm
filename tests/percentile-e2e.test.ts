@@ -5,6 +5,7 @@
  * using the EasyTPL API with DuckDB.
  */
 
+import fs from 'fs';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { parse } from '../dist/parser/parser.js';
 import { fromCSV, fromDuckDBTable } from '../dist/index.js';
@@ -571,115 +572,140 @@ describe('Percentile-based ordering and limits', () => {
 
 // BigQuery tests - require USE_LIVE_BIGQUERY=true environment variable
 const USE_LIVE_BIGQUERY = process.env.USE_LIVE_BIGQUERY === 'true';
-const BIGQUERY_TABLE = 'slite-development.tpl_test.test_usa_names';
+const BIGQUERY_TABLE = process.env.BIGQUERY_TEST_TABLE || 'bigquery-public-data.usa_names.usa_1910_current';
+
+function loadBigQueryCredentials(): { projectId?: string } {
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './config/dev-credentials.json';
+  try {
+    const creds = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(credentialsPath);
+    }
+    return { projectId: process.env.BIGQUERY_PROJECT_ID ?? creds.project_id };
+  } catch {
+    return { projectId: process.env.BIGQUERY_PROJECT_ID };
+  }
+}
 
 describe.skipIf(!USE_LIVE_BIGQUERY)('Percentile E2E with BigQuery', () => {
-  // Dynamic import of fromBigQueryTable since it requires credentials
-  let fromBigQueryTable: typeof import('../dist/index.js').fromBigQueryTable;
+  // The public dataset column is called 'number' (a Malloy reserved word),
+  // so we use fromConnectionSQL to alias it as 'births' at the SQL level.
+  // This also exercises the SQL source + BigQuery percentile path.
+  let fromConnectionSQL: typeof import('../dist/index.js').fromConnectionSQL;
+  let BigQueryConnection: any;
 
   beforeAll(async () => {
     const module = await import('../dist/index.js');
-    fromBigQueryTable = module.fromBigQueryTable;
+    fromConnectionSQL = module.fromConnectionSQL;
+    const bqModule = await import('@malloydata/db-bigquery');
+    BigQueryConnection = bqModule.BigQueryConnection;
   });
+
+  function makeBigQueryTPL() {
+    const { projectId } = loadBigQueryCredentials();
+    const config: Record<string, string> = {};
+    if (projectId) config.projectId = projectId;
+    const connection = new BigQueryConnection('bigquery', {}, config);
+    return fromConnectionSQL({
+      connection,
+      sql: `SELECT state, gender, number as births, name, year FROM \`${BIGQUERY_TABLE}\``,
+      dialect: 'bigquery',
+    });
+  }
 
   describe('Basic percentile queries', () => {
     it('executes p50 (median) query successfully', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html, grid } = await tpl.query('TABLE ROWS state[-3] * births.p50;');
 
       expect(html).toContain('<table');
       expect(grid).toBeDefined();
       expect(grid.rowHeaders).toBeDefined();
       expect(grid.rowHeaders!.length).toBeGreaterThan(0);
-    });
+    }, 30_000);
 
     it('executes median query (alias for p50)', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query('TABLE ROWS state[-3] * births.median;');
 
       expect(html).toContain('<table');
-    });
+    }, 30_000);
 
     it('executes IQR query (p25, p50, p75)', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html, grid } = await tpl.query(
         'TABLE ROWS state[-3] * births.(p25 | p50 | p75);'
       );
 
       expect(html).toContain('<table');
       expect(grid).toBeDefined();
-      // Should have labels with measure name
       expect(html).toMatch(/births P25|births P50|births P75/);
-    });
+    }, 30_000);
   });
 
   describe('Percentiles with crosstab structure', () => {
     it('executes percentile with row and column dimensions', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query(
         'TABLE ROWS state[-3] * births.p50 COLS gender;'
       );
 
       expect(html).toContain('<table');
-      // Should have F and M columns
       expect(html).toMatch(/[FM]/);
-    });
+    }, 30_000);
 
     it('executes percentile with multiple row dimensions', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query(
         'TABLE ROWS state[-2] * gender * births.p50;'
       );
 
       expect(html).toContain('<table');
-    });
+    }, 30_000);
 
     it('executes percentile with COLS dimension and multi-binding', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html, grid } = await tpl.query(
         'TABLE ROWS state[-3] COLS gender * births.(p25 | p50 | p75);'
       );
 
       expect(html).toContain('<table');
-      // Should have 6 data columns (2 genders x 3 percentiles)
       expect(grid.colHeaders).toBeDefined();
-    });
+    }, 30_000);
   });
 
   describe('Mixed aggregations', () => {
     it('executes query with both percentile and regular aggregations', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query(
         'TABLE ROWS state[-3] * births.(sum | p50 | mean);'
       );
 
       expect(html).toContain('<table');
-      // Should have labels for all aggregations
       expect(html).toMatch(/births sum|births P50|births mean/);
-    });
+    }, 30_000);
   });
 
   describe('Percentiles with WHERE clause', () => {
     it('applies WHERE filter to percentile computation', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query(
         "TABLE WHERE gender = 'M' ROWS state[-3] * births.p50;"
       );
 
       expect(html).toContain('<table');
-      // Percentiles should be computed only over male records
-    });
+    }, 30_000);
   });
 
   describe('High percentiles', () => {
     it('handles p90, p95, p99', async () => {
-      const tpl = fromBigQueryTable({ table: BIGQUERY_TABLE });
+      const tpl = makeBigQueryTPL();
       const { html } = await tpl.query(
         'TABLE ROWS state[-3] * births.(p90 | p95 | p99);'
       );
 
       expect(html).toContain('<table');
       expect(html).toMatch(/births P90|births P95|births P99/);
-    });
+    }, 30_000);
   });
 });

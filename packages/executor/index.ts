@@ -104,19 +104,32 @@ export async function createConnection(options: ConnectionOptions): Promise<Conn
 
 async function createBigQueryConnection(options: BigQueryConnectionOptions): Promise<Connection> {
   const { BigQueryConnection } = await loadBigQuery();
-  const credentialsPath = options.credentialsPath ?? './config/dev-credentials.json';
 
-  // Read credentials to get project ID if not provided
-  const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
-  const projectId = options.projectId ?? credentials.project_id;
+  // Resolve credentials file: explicit path > default dev path > none (ADC)
+  const credentialsPath = options.credentialsPath
+    ?? (fs.existsSync('./config/dev-credentials.json') ? './config/dev-credentials.json' : undefined);
 
-  // Set the environment variable for Google Cloud authentication
-  process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(credentialsPath);
+  let projectId = options.projectId;
+
+  if (credentialsPath) {
+    const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
+    projectId = projectId ?? credentials.project_id;
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(credentialsPath);
+  }
+
+  // Fall back to standard env vars for project ID (gcloud config doesn't propagate to client libraries)
+  projectId = projectId
+    ?? process.env.BIGQUERY_PROJECT_ID
+    ?? process.env.GOOGLE_CLOUD_PROJECT
+    ?? process.env.GCLOUD_PROJECT;
+
+  const config: Record<string, string> = { location: options.location ?? 'US' };
+  if (projectId) config.projectId = projectId;
 
   const connection = new BigQueryConnection(
     'bigquery',
     {},
-    { projectId, location: options.location ?? 'US' }
+    config
   );
 
   connectionInstance = connection;
@@ -294,10 +307,12 @@ source: names is duckdb.table('${csvPath}') extend {
 `;
   }
 
-  // BigQuery source
+  // BigQuery source — public dataset uses 'number' instead of 'births'
+  const bqTable = process.env.BIGQUERY_TEST_TABLE || 'bigquery-public-data.usa_names.usa_1910_current';
   return `
-source: names is bigquery.table('slite-development.tpl_test.test_usa_names') extend {
+source: names is bigquery.table('${bqTable}') extend {
   dimension:
+    births is number
     population is floor(births * 37.5)
   measure:
     total_births is births.sum()

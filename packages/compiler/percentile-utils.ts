@@ -229,6 +229,43 @@ export function findDimensions(stmt: TPLStatement): string[] {
 export type SqlDialect = 'duckdb' | 'bigquery';
 
 /**
+ * Describes the data source for SQL generation.
+ * - 'table': a table path (file or fully-qualified table name)
+ * - 'sql': a raw SQL query to wrap as a subquery
+ */
+export type SourceRef =
+  | { type: 'table'; path: string }
+  | { type: 'sql'; query: string };
+
+/**
+ * Build a FROM clause for the given source reference and dialect.
+ */
+function buildFromClause(source: SourceRef, dialect: SqlDialect): string {
+  if (source.type === 'sql') {
+    return `(${source.query}) _src`;
+  }
+  if (dialect === 'duckdb') {
+    return `'${source.path}'`;
+  }
+  // BigQuery uses backtick-quoted table names
+  return `\`${source.path}\``;
+}
+
+/**
+ * Create a SourceRef from a table path string (backwards compatibility).
+ */
+export function tableSource(path: string): SourceRef {
+  return { type: 'table', path };
+}
+
+/**
+ * Create a SourceRef from a raw SQL query.
+ */
+export function sqlSource(query: string): SourceRef {
+  return { type: 'sql', query };
+}
+
+/**
  * Generate the SQL window function for a percentile computation.
  *
  * DuckDB: quantile_cont(measure, quantile) OVER (PARTITION BY dims)
@@ -255,7 +292,7 @@ export function generatePercentileWindowFunction(
 /**
  * Generate a derived SQL source that pre-computes percentiles.
  *
- * @param tablePath The path to the source table (e.g., 'data/file.csv')
+ * @param source The data source (table path or SQL query) — accepts string for backwards compat or SourceRef
  * @param percentiles The percentiles to compute
  * @param partitionColumns Columns to partition by (dimensions)
  * @param dialect SQL dialect
@@ -263,12 +300,14 @@ export function generatePercentileWindowFunction(
  * @returns SQL query string for the derived source
  */
 export function generatePercentileSourceSQL(
-  tablePath: string,
+  source: string | SourceRef,
   percentiles: PercentileInfo[],
   partitionColumns: string[],
   dialect: SqlDialect,
   whereClause?: string
 ): string {
+  const sourceRef: SourceRef = typeof source === 'string' ? tableSource(source) : source;
+
   // Build SELECT clause with window functions
   const windowFunctions = percentiles.map(p => {
     const windowFunc = generatePercentileWindowFunction(
@@ -283,14 +322,7 @@ export function generatePercentileSourceSQL(
   // Build WHERE clause if provided
   const wherePart = whereClause ? ` WHERE ${whereClause}` : '';
 
-  // Generate the SQL
-  if (dialect === 'duckdb') {
-    // DuckDB can read files directly
-    return `SELECT *, ${windowFunctions.join(', ')} FROM '${tablePath}'${wherePart}`;
-  } else {
-    // BigQuery uses fully qualified table names
-    return `SELECT *, ${windowFunctions.join(', ')} FROM \`${tablePath}\`${wherePart}`;
-  }
+  return `SELECT *, ${windowFunctions.join(', ')} FROM ${buildFromClause(sourceRef, dialect)}${wherePart}`;
 }
 
 /**
@@ -666,7 +698,7 @@ export interface PercentileConfig {
  * Analyze a TPL statement and generate percentile configuration if needed.
  *
  * @param stmt Parsed TPL statement
- * @param tablePath Path to the source table
+ * @param source Path to the source table (string) or a SourceRef
  * @param sourceName Malloy source name
  * @param dialect SQL dialect
  * @param originalTPL Original TPL query string
@@ -674,7 +706,7 @@ export interface PercentileConfig {
  */
 export function analyzeAndGeneratePercentileConfig(
   stmt: TPLStatement,
-  tablePath: string,
+  source: string | SourceRef,
   sourceName: string,
   dialect: SqlDialect,
   originalTPL: string
@@ -706,7 +738,7 @@ export function analyzeAndGeneratePercentileConfig(
 
   // Generate SQL with all needed partition levels
   const derivedSQL = generateMultiLevelPercentileSQL(
-    tablePath,
+    source,
     percentiles,
     partitionLevels,
     dialect,
@@ -744,12 +776,14 @@ export function analyzeAndGeneratePercentileConfig(
  * - __income_p50__state: PARTITION BY state (for ALL gender cells)
  */
 export function generateMultiLevelPercentileSQL(
-  tablePath: string,
+  source: string | SourceRef,
   percentiles: PercentileInfo[],
   partitionLevels: PartitionLevel[],
   dialect: SqlDialect,
   whereClause?: string
 ): string {
+  const sourceRef: SourceRef = typeof source === 'string' ? tableSource(source) : source;
+
   const windowFunctions: string[] = [];
 
   for (const level of partitionLevels) {
@@ -767,9 +801,5 @@ export function generateMultiLevelPercentileSQL(
 
   const wherePart = whereClause ? ` WHERE ${whereClause}` : '';
 
-  if (dialect === 'duckdb') {
-    return `SELECT *, ${windowFunctions.join(', ')} FROM '${tablePath}'${wherePart}`;
-  } else {
-    return `SELECT *, ${windowFunctions.join(', ')} FROM \`${tablePath}\`${wherePart}`;
-  }
+  return `SELECT *, ${windowFunctions.join(', ')} FROM ${buildFromClause(sourceRef, dialect)}${wherePart}`;
 }

@@ -77,10 +77,13 @@ export {
   PERCENTILE_METHODS,
   PERCENTILE_VALUES,
   PERCENTILE_LABELS,
+  tableSource,
+  sqlSource,
   type PercentileInfo,
   type PercentileConfig,
   type PartitionLevel,
   type SqlDialect,
+  type SourceRef,
 } from './percentile-utils.js';
 
 // dimension utilities (for percentile partitioning and ordering)
