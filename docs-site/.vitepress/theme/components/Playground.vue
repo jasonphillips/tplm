@@ -100,6 +100,7 @@ interface Props {
   showTiming?: boolean
   showDataset?: boolean
   autoRun?: boolean
+  trackSql?: boolean
   variations?: Variation[]
 }
 
@@ -112,6 +113,7 @@ const props = withDefaults(defineProps<Props>(), {
   showTiming: false,
   showDataset: true,
   autoRun: false,
+  trackSql: false,
   variations: () => []
 })
 
@@ -178,7 +180,7 @@ async function execute() {
       await executor.initialize()
     }
 
-    const execResult = await executor.execute(tplCode.value, props.dataset)
+    const execResult = await executor.execute(tplCode.value, props.dataset, props.trackSql ? { trackSQL: true } : undefined)
 
     if (execResult.success) {
       result.value = execResult

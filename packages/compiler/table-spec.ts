@@ -524,6 +524,24 @@ export interface CellValue {
 
   /** Path description for tooltips */
   readonly pathDescription: string;
+
+  /**
+   * The SQL query that produced this cell's data.
+   * Only populated when `trackSQL: true` is set.
+   * This is the full SQL for the query — multiple cells may share the same SQL
+   * when they come from the same underlying query.
+   */
+  readonly sql?: string;
+
+  /**
+   * A cell-specific SQL query narrowed with WHERE conditions for this cell's
+   * exact dimension values. This would return only the row(s) relevant to
+   * this specific cell if executed independently.
+   * Only populated when `trackSQL: true` is set.
+   * Note: For percentage/ACROSS aggregates, the narrowed SQL may not reproduce
+   * the same value because window functions depend on the full result set.
+   */
+  readonly cellSQL?: string;
 }
 
 // ---

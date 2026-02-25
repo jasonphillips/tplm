@@ -140,6 +140,11 @@ export interface BuildGridSpecOptions {
   malloyQueries?: MalloyQuerySpec[];
   /** Ordering provider for definition-order sorting */
   orderingProvider?: DimensionOrderingProvider;
+  /**
+   * Raw SQL queries by query ID, captured from the Malloy runtime.
+   * When provided, each CellValue will include `sql` and `cellSQL` fields.
+   */
+  sqlQueries?: Map<string, string>;
 }
 
 /**
@@ -159,12 +164,14 @@ export function buildGridSpec(
   // Handle both old signature (array) and new signature (options object)
   let malloyQueries: MalloyQuerySpec[] | undefined;
   let orderingProvider: DimensionOrderingProvider | undefined;
+  let sqlQueries: Map<string, string> | undefined;
 
   if (Array.isArray(malloyQueriesOrOptions)) {
     malloyQueries = malloyQueriesOrOptions;
   } else if (malloyQueriesOrOptions) {
     malloyQueries = malloyQueriesOrOptions.malloyQueries;
     orderingProvider = malloyQueriesOrOptions.orderingProvider;
+    sqlQueries = malloyQueriesOrOptions.sqlQueries;
   }
 
   // Set module-level ordering provider for definition-order sorting
@@ -243,7 +250,8 @@ export function buildGridSpec(
       plan,
       results,
       invertedQueries,
-      flatQueries
+      flatQueries,
+      sqlQueries
     );
 
     // Check for totals
@@ -1569,12 +1577,56 @@ function makeCellKey(
     .join("|");
 }
 
+/** Stored cell entry with value and optional query attribution */
+interface CellEntry {
+  value: number | null;
+  queryId?: string;
+}
+
 interface CellLookup {
   get(
     rowValues: DimensionValues,
     colValues: DimensionValues,
     aggregate?: string
   ): CellValue;
+}
+
+/**
+ * Build a cell-specific SQL query by wrapping the base SQL with a WHERE clause
+ * that narrows to the specific dimension values for this cell.
+ */
+function buildCellSQL(
+  baseSQL: string,
+  rowValues: DimensionValues,
+  colValues: DimensionValues
+): string {
+  const conditions: string[] = [];
+  const addCondition = (dim: string, val: string | number) => {
+    if (typeof val === "number") {
+      conditions.push(`${quoteIdentifier(dim)} = ${val}`);
+    } else {
+      conditions.push(`${quoteIdentifier(dim)} = '${val.replace(/'/g, "''")}'`);
+    }
+  };
+
+  for (const [dim, val] of rowValues) {
+    addCondition(dim, val);
+  }
+  for (const [dim, val] of colValues) {
+    addCondition(dim, val);
+  }
+
+  if (conditions.length === 0) return baseSQL;
+
+  // Wrap: SELECT * FROM (baseSQL) AS _tpl WHERE conditions
+  return `SELECT * FROM (\n${baseSQL}\n) AS _tpl_base\nWHERE ${conditions.join(" AND ")}`;
+}
+
+/**
+ * Quote a SQL identifier with double quotes.
+ */
+function quoteIdentifier(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
@@ -1586,16 +1638,18 @@ interface CellLookup {
  *
  * @param invertedQueries Set of query IDs that have inverted axes (column dim is outer in Malloy)
  * @param flatQueries Set of query IDs that use flat structure (all dims in single group_by)
+ * @param sqlQueries Optional map of query ID → SQL string for attribution
  */
 function buildCellLookup(
   spec: TableSpec,
   plan: QueryPlan,
   results: QueryResults,
   invertedQueries: Set<string>,
-  flatQueries: Set<string> = new Set()
+  flatQueries: Set<string> = new Set(),
+  sqlQueries?: Map<string, string>
 ): CellLookup {
-  // Build an index: cellKey → aggregateName → value
-  const cellIndex = new Map<string, Map<string, number | null>>();
+  // Build an index: cellKey → aggregateName → CellEntry (value + queryId)
+  const cellIndex = new Map<string, Map<string, CellEntry>>();
 
   // Index all query results by plan query ID
   // Since we now use a unified QueryPlan system, IDs should match directly
@@ -1658,13 +1712,26 @@ function buildCellLookup(
         };
       }
 
-      const value = cellData.get(aggName) ?? null;
+      const entry = cellData.get(aggName);
+      const value = entry?.value ?? null;
+
+      // Build SQL attribution if available
+      let sql: string | undefined;
+      let cellSQL: string | undefined;
+      if (sqlQueries && entry?.queryId) {
+        sql = sqlQueries.get(entry.queryId);
+        if (sql) {
+          cellSQL = buildCellSQL(sql, rowValues, colValues);
+        }
+      }
 
       return {
         raw: value,
         formatted: formatValue(value, agg),
         aggregate: aggName,
         pathDescription: cellKey,
+        sql,
+        cellSQL,
       };
     },
   };
@@ -1682,7 +1749,7 @@ function buildCellLookup(
 function indexQueryResults(
   data: any[],
   query: TaggedQuerySpec,
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   aggregates: AggregateInfo[],
   isInverted: boolean = false,
   isFlatQuery: boolean = false
@@ -1730,7 +1797,8 @@ function indexQueryResults(
     isInverted,
     query.rowGroupings, // logical row groupings
     query.colGroupings, // logical col groupings
-    primarySuffix
+    primarySuffix,
+    query.id
   );
 
   // Handle merged queries with additional column variants
@@ -1764,7 +1832,8 @@ function indexQueryResults(
         isInverted,
         query.rowGroupings,
         variant.colGroupings,
-        nestNameSuffix
+        nestNameSuffix,
+        query.id
       );
     }
   }
@@ -1779,7 +1848,7 @@ function indexQueryResults(
 function indexFlatQueryResults(
   data: any[],
   query: TaggedQuerySpec,
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   aggregates: AggregateInfo[]
 ): void {
   for (const row of data) {
@@ -1818,7 +1887,7 @@ function indexFlatQueryResults(
     }
 
     // Index aggregate values using the combined row/col values
-    indexAggregateValues(row, aggregates, rowValues, colValues, cellIndex);
+    indexAggregateValues(row, aggregates, rowValues, colValues, cellIndex, query.id);
   }
 }
 
@@ -1839,12 +1908,13 @@ function flattenAndIndex(
   aggregates: AggregateInfo[],
   baseOuterValues: Map<string, string | number>,
   baseNestedValues: Map<string, string | number>,
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   outerDepth: number,
   isInverted: boolean = false,
   logicalRowGroupings?: GroupingInfo[],
   logicalColGroupings?: GroupingInfo[],
-  nestNameSuffix: string = ""
+  nestNameSuffix: string = "",
+  queryId?: string
 ): void {
   for (const row of data) {
     // Build outer values - collect ALL outer dimension values from the current row
@@ -1886,7 +1956,8 @@ function flattenAndIndex(
             isInverted,
             logicalRowGroupings,
             logicalColGroupings,
-            nestNameSuffix
+            nestNameSuffix,
+            queryId
           );
           break; // Don't continue with this row, we recursed
         }
@@ -1915,7 +1986,8 @@ function flattenAndIndex(
         cellIndex,
         0,
         isInverted,
-        nestNameSuffix
+        nestNameSuffix,
+        queryId
       );
     } else {
       // Direct aggregate values
@@ -1927,7 +1999,8 @@ function flattenAndIndex(
           aggregates,
           baseNestedValues, // These are actually the row values (empty when no nesting)
           currentOuterValues, // These are actually the col values
-          cellIndex
+          cellIndex,
+          queryId
         );
       } else {
         indexAggregateValues(
@@ -1935,7 +2008,8 @@ function flattenAndIndex(
           aggregates,
           currentOuterValues,
           baseNestedValues,
-          cellIndex
+          cellIndex,
+          queryId
         );
       }
     }
@@ -1957,10 +2031,11 @@ function indexColumnPivots(
   aggregates: AggregateInfo[],
   outerValues: Map<string, string | number>,
   baseNestedValues: Map<string, string | number>,
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   nestedDepth: number,
   isInverted: boolean = false,
-  nestNameSuffix: string = ""
+  nestNameSuffix: string = "",
+  queryId?: string
 ): void {
   const currentDim = nestedGroupings[nestedDepth];
   const remainingDims = nestedGroupings.slice(nestedDepth);
@@ -2008,7 +2083,8 @@ function indexColumnPivots(
             aggregates,
             currentNestedValues, // These are actually row values
             outerValues, // These are actually col values
-            cellIndex
+            cellIndex,
+            queryId
           );
         } else {
           indexAggregateValues(
@@ -2016,7 +2092,8 @@ function indexColumnPivots(
             aggregates,
             outerValues,
             currentNestedValues,
-            cellIndex
+            cellIndex,
+            queryId
           );
         }
       }
@@ -2056,7 +2133,8 @@ function indexColumnPivots(
         cellIndex,
         nestedDepth + 1,
         isInverted,
-        nestNameSuffix
+        nestNameSuffix,
+        queryId
       );
     } else {
       // Leaf - index aggregate values
@@ -2068,7 +2146,8 @@ function indexColumnPivots(
           aggregates,
           currentNestedValues, // These are actually row values
           outerValues, // These are actually col values
-          cellIndex
+          cellIndex,
+          queryId
         );
       } else {
         indexAggregateValues(
@@ -2076,7 +2155,8 @@ function indexColumnPivots(
           aggregates,
           outerValues,
           currentNestedValues,
-          cellIndex
+          cellIndex,
+          queryId
         );
       }
     }
@@ -2091,7 +2171,8 @@ function indexAggregateValues(
   aggregates: AggregateInfo[],
   rowValues: Map<string, string | number>,
   colValues: Map<string, string | number>,
-  cellIndex: Map<string, Map<string, number | null>>
+  cellIndex: Map<string, Map<string, CellEntry>>,
+  queryId?: string
 ): void {
   const cellKey = makeCellKey(rowValues, colValues);
 
@@ -2104,7 +2185,10 @@ function indexAggregateValues(
   for (const agg of aggregates) {
     const value = row[agg.name];
     if (value !== undefined) {
-      cellData.set(agg.name, typeof value === "number" ? value : null);
+      cellData.set(agg.name, {
+        value: typeof value === "number" ? value : null,
+        queryId,
+      });
     }
   }
 }
@@ -2363,7 +2447,7 @@ function hasNestedKey(
  */
 function indexQueryResultsAuto(
   data: any[],
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   aggregates: AggregateInfo[]
 ): void {
   if (!data || data.length === 0) return;
@@ -2422,7 +2506,7 @@ function flattenAndIndexAuto(
   aggregates: AggregateInfo[],
   baseRowValues: Map<string, string | number>,
   baseColValues: Map<string, string | number>,
-  cellIndex: Map<string, Map<string, number | null>>
+  cellIndex: Map<string, Map<string, CellEntry>>
 ): void {
   for (const row of data) {
     const currentRowValues = new Map(baseRowValues);
@@ -2493,7 +2577,7 @@ function indexColumnPivotsAuto(
   aggregates: AggregateInfo[],
   rowValues: Map<string, string | number>,
   baseColValues: Map<string, string | number>,
-  cellIndex: Map<string, Map<string, number | null>>,
+  cellIndex: Map<string, Map<string, CellEntry>>,
   colDepth: number
 ): void {
   if (colDepth >= colGroupings.length) {

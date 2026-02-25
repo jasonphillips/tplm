@@ -236,6 +236,26 @@ const cells = findAllCells(html, { state: 'CA' });
 // Returns array of all California cells
 ```
 
+## SQL Attribution Attributes
+
+When [`trackSQL: true`](/styling/sql-attribution) is enabled, data cells include two additional attributes:
+
+| Attribute | Purpose | Format |
+|-----------|---------|--------|
+| `data-sql` | Full SQL query that produced the cell | Raw SQL string |
+| `data-cell-sql` | Narrowed SQL filtered to this cell's dimensions | `SELECT * FROM (<base>) WHERE ...` |
+
+```html
+<td title="Education: HS, Gender: Female → Income Sum"
+    data-cell="education=HS|gender=Female"
+    data-sql="SELECT ... FROM samples GROUP BY ..."
+    data-cell-sql="SELECT * FROM (...) AS _tpl_base WHERE &quot;education&quot; = 'HS' AND &quot;gender&quot; = 'Female'">
+  45,678
+</td>
+```
+
+See [SQL Attribution](/styling/sql-attribution) for full details and a live demo.
+
 ## Summary
 
 | Feature | Attribute | Use Case |
@@ -243,5 +263,7 @@ const cells = findAllCells(html, { state: 'CA' });
 | Human tooltip | `title` | Quick visual inspection |
 | Machine path | `data-cell` | JavaScript selection, testing |
 | Value lookup | `textContent` | Reading cell values |
+| SQL query | `data-sql` | Verify underlying SQL (opt-in) |
+| Cell-specific SQL | `data-cell-sql` | Narrowed query for one cell (opt-in) |
 
-Both attributes are automatically generated - no configuration needed. They work with all TPL features including totals, nested dimensions, and multiple aggregates.
+The `title` and `data-cell` attributes are automatically generated - no configuration needed. The `data-sql` and `data-cell-sql` attributes require `trackSQL: true`. All attributes work with all TPL features including totals, nested dimensions, and multiple aggregates.

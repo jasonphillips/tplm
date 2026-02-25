@@ -45,7 +45,8 @@ function handleMouseOver(e: MouseEvent): void {
   if (!title) return;
 
   // Parse and format the content
-  const content = formatPopoverContent(title);
+  const cellSQL = cell.getAttribute('data-cell-sql');
+  const content = formatPopoverContent(title, cellSQL);
   popover.innerHTML = content;
 
   // Position the popover
@@ -92,7 +93,7 @@ function handleMouseOut(e: MouseEvent): void {
   }, 100);
 }
 
-function formatPopoverContent(title: string): string {
+function formatPopoverContent(title: string, cellSQL?: string | null): string {
   // Parse "Dim: Val, Dim: Val -> Aggregate" or "Dim: Val, Dim: Val"
   // The arrow might be -> or unicode arrow
   const arrowMatch = title.match(/\s*(?:->|→)\s*/);
@@ -129,6 +130,10 @@ function formatPopoverContent(title: string): string {
 
   if (aggregate) {
     html += `<div class="popover-aggregate">${escapeHtml(aggregate)}</div>`;
+  }
+
+  if (cellSQL) {
+    html += `<div class="popover-sql"><div class="popover-sql-label">SQL</div><pre class="popover-sql-code">${escapeHtml(cellSQL)}</pre></div>`;
   }
 
   return html;

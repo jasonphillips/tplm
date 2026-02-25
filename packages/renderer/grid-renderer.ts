@@ -708,7 +708,9 @@ function renderDataCell(
   const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
   const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
 
-  lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
+  const sqlAttr = cell.sql ? ` data-sql="${escapeHTML(cell.sql)}"` : '';
+  const cellSQLAttr = cell.cellSQL ? ` data-cell-sql="${escapeHTML(cell.cellSQL)}"` : '';
+  lines.push(`<td${classAttr}${titleAttr}${dataAttr}${sqlAttr}${cellSQLAttr}>${escapeHTML(cell.formatted)}</td>`);
 }
 
 /**
@@ -735,7 +737,9 @@ function renderDataCells(
     const humanPath = buildHumanPath(rowValues, colValues, rowAgg, grid.aggregates);
     const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
     const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
-    lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
+    const sqlAttr = cell.sql ? ` data-sql="${escapeHTML(cell.sql)}"` : '';
+    const cellSQLAttr = cell.cellSQL ? ` data-cell-sql="${escapeHTML(cell.cellSQL)}"` : '';
+    lines.push(`<td${classAttr}${titleAttr}${dataAttr}${sqlAttr}${cellSQLAttr}>${escapeHTML(cell.formatted)}</td>`);
   } else {
     // Multiple aggregate cells
     for (const agg of grid.aggregates) {
@@ -743,7 +747,9 @@ function renderDataCells(
       const humanPath = buildHumanPath(rowValues, colValues, agg.name, grid.aggregates);
       const titleAttr = humanPath ? ` title="${escapeHTML(humanPath)}"` : '';
       const dataAttr = cell.pathDescription ? ` data-cell="${escapeHTML(cell.pathDescription)}"` : '';
-      lines.push(`<td${classAttr}${titleAttr}${dataAttr}>${escapeHTML(cell.formatted)}</td>`);
+      const sqlAttr = cell.sql ? ` data-sql="${escapeHTML(cell.sql)}"` : '';
+      const cellSQLAttr = cell.cellSQL ? ` data-cell-sql="${escapeHTML(cell.cellSQL)}"` : '';
+      lines.push(`<td${classAttr}${titleAttr}${dataAttr}${sqlAttr}${cellSQLAttr}>${escapeHTML(cell.formatted)}</td>`);
     }
   }
 }

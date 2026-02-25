@@ -238,8 +238,13 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s ease;
-  max-width: 320px;
+  max-width: 420px;
   min-width: 150px;
+}
+
+/* When popover has SQL content, allow more width */
+.tpl-cell-popover:has(.popover-sql) {
+  max-width: 500px;
 }
 
 .tpl-cell-popover.visible {
@@ -277,6 +282,37 @@
   font-size: 12px;
 }
 
+/* SQL section in popover */
+.tpl-cell-popover .popover-sql {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #374151;
+}
+
+.tpl-cell-popover .popover-sql-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+
+.tpl-cell-popover .popover-sql-code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #e5e7eb;
+  background: #111827;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
 /* Light mode version */
 :root:not(.dark) .tpl-cell-popover {
   background: #ffffff;
@@ -297,6 +333,19 @@
 :root:not(.dark) .tpl-cell-popover .popover-aggregate {
   border-top-color: #e5e7eb;
   color: #2563eb;
+}
+
+:root:not(.dark) .tpl-cell-popover .popover-sql {
+  border-top-color: #e5e7eb;
+}
+
+:root:not(.dark) .tpl-cell-popover .popover-sql-label {
+  color: #6b7280;
+}
+
+:root:not(.dark) .tpl-cell-popover .popover-sql-code {
+  color: #1f2937;
+  background: #f3f4f6;
 }
 
 /* Hover effect on data cells */

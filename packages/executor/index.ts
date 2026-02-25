@@ -332,6 +332,8 @@ export interface ExecuteOptions {
   outputPath?: string;
   /** Return raw Malloy result object */
   raw?: boolean;
+  /** When true, also capture the generated SQL string */
+  captureSQL?: boolean;
 }
 
 /**
@@ -359,7 +361,15 @@ export async function executeMalloy(
   try {
     // Parse and run the Malloy query
     // Note: Malloy has a default rowLimit of 10 - we use a high limit to get all data
-    const result = await runtime.loadQuery(malloySource).run({ rowLimit: 100000 });
+    const materializer = runtime.loadQuery(malloySource);
+
+    // Capture SQL before running if requested
+    let sql: string | undefined;
+    if (options.captureSQL) {
+      sql = await materializer.getSQL();
+    }
+
+    const result = await materializer.run({ rowLimit: 100000 });
 
     // Get the data
     const data = result.data.toObject();
@@ -374,6 +384,9 @@ export async function executeMalloy(
       console.log(`Results written to: ${options.outputPath}`);
     }
 
+    if (options.captureSQL) {
+      return { data: options.raw ? result : data, sql };
+    }
     return options.raw ? result : data;
   } catch (error) {
     console.error('Malloy execution error:', error);

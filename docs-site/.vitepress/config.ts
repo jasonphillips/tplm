@@ -216,6 +216,7 @@ export default defineConfig({
         items: [
           { text: "CSS Reference", link: "/styling/css-reference" },
           { text: "Cell Data Attributes", link: "/styling/cell-data-attributes" },
+          { text: "SQL Attribution", link: "/styling/sql-attribution" },
         ],
       },
     ],

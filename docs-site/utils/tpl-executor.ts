@@ -22,6 +22,11 @@ import {
 } from '@tpl/compiler'
 import { renderGridToHTML } from '@tpl/renderer'
 
+interface ExecuteOptions {
+  /** When true, capture raw SQL for each query and include on cells */
+  trackSQL?: boolean
+}
+
 interface ExecuteResult {
   success: boolean
   html?: string
@@ -176,14 +181,14 @@ class TPLExecutor {
     return `${sourceDecl}extend {${extendBlock}}`
   }
 
-  async execute(tplQuery: string, sourceName: string = 'samples'): Promise<ExecuteResult> {
+  async execute(tplQuery: string, sourceName: string = 'samples', options?: ExecuteOptions): Promise<ExecuteResult> {
     // Queue execution to prevent concurrent access to DuckDB/Malloy
-    const result = this.executeQueue.then(() => this.doExecute(tplQuery, sourceName))
+    const result = this.executeQueue.then(() => this.doExecute(tplQuery, sourceName, options))
     this.executeQueue = result.catch(() => {}) // Keep queue going even on errors
     return result
   }
 
-  private async doExecute(tplQuery: string, sourceName: string): Promise<ExecuteResult> {
+  private async doExecute(tplQuery: string, sourceName: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     if (!this.isInitialized) {
       await this.initialize()
     }
@@ -280,6 +285,7 @@ class TPLExecutor {
       // Execute queries
       const executeStart = performance.now()
       const queryResults = new Map<string, any[]>()
+      const sqlQueries: Map<string, string> | undefined = options?.trackSQL ? new Map() : undefined
 
       for (const queryInfo of malloyQueries) {
         // Post-process Malloy for ALL patterns if needed
@@ -295,7 +301,19 @@ class TPLExecutor {
         }
 
         const fullMalloy = `${effectiveMalloySource}\n${processedMalloy}`
-        const queryResult = await this.runtime.loadQuery(fullMalloy).run({ rowLimit: 100000 })
+        const materializer = this.runtime.loadQuery(fullMalloy)
+
+        // Capture SQL when trackSQL is enabled
+        if (sqlQueries) {
+          try {
+            const sql = await materializer.getSQL()
+            sqlQueries.set(queryInfo.id, sql)
+          } catch {
+            // SQL capture is best-effort; don't fail the query
+          }
+        }
+
+        const queryResult = await materializer.run({ rowLimit: 100000 })
         const data = queryResult.data.toObject()
         queryResults.set(queryInfo.id, data)
       }
@@ -306,6 +324,7 @@ class TPLExecutor {
       const gridSpec = buildGridSpec(tableSpec, queryPlan, queryResults, {
         malloyQueries,
         orderingProvider: this.orderingProvider ?? undefined,
+        sqlQueries,
       })
       const html = renderGridToHTML(gridSpec)
       renderTime = Math.round(performance.now() - renderStart)
